@@ -5,7 +5,7 @@ GODOT="${GODOT:-godot}"
 cd "$(dirname "$0")/.."
 "$GODOT" --headless --path . --import >/dev/null 2>&1 || true
 rc=0
-for t in test_core test_reef; do
+for t in test_core test_reef test_tide; do
   [ -f "tests/$t.gd" ] || continue
   out=$("$GODOT" --headless --path . --script "res://tests/$t.gd" 2>&1 | grep -v -E "ALSA|audio_driver|dummy driver|initialize \(servers|^$|Godot Engine") || true
   echo "$out"

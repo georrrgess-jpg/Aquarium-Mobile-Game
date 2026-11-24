@@ -60,6 +60,8 @@ func start_run(layout: Board = null) -> void:
 	run.seed_value = (base_seed + (n - 1) * 7919) & 0xFFFFFFFF
 	run.rng = SeededRng.new(run.seed_value)
 	run.currents = GameConfig.START_CURRENTS
+	run.tide = Tide.phase_at()
+	run.spawn_table = Tide.spawn_table(run.tide)       # fixed for the life of this run
 	run.tutorial = (n == 1)
 	if layout != null:
 		run.board = layout
@@ -117,10 +119,11 @@ func _random_board() -> Board:
 	return b
 
 func _roll_natural() -> int:
+	var table: Array = run.spawn_table if not run.spawn_table.is_empty() else GameConfig.SPAWN_TABLE
 	var weights: Array = []
-	for e in GameConfig.SPAWN_TABLE:
+	for e in table:
 		weights.append(e[2])
-	var e: Array = GameConfig.SPAWN_TABLE[run.rng.pick_weighted(weights)]
+	var e: Array = table[run.rng.pick_weighted(weights)]
 	return Creature.make(e[0], e[1])
 
 # --- Queries ---------------------------------------------------------------------
@@ -207,6 +210,7 @@ func _new_result() -> Dictionary:
 		"ok": true, "reason": "", "turn_used": false, "free": false,
 		"events": [], "coins": 0, "pearls": 0, "chain": 0, "refund": false,
 		"surge": [], "flood": false,
+		"goals_done": [], "visitor_created": false, "visitor_complete": false,
 	}
 
 func _reject(reason: String) -> Dictionary:
@@ -250,6 +254,7 @@ func try_pair(src: int, dst: int) -> Dictionary:
 	res["events"].append(ev)
 	var steps: Array = MergeRules.resolve(b, {dst: true}, dst, 0)
 	_apply_steps(res, steps)
+	_record_progress(res)
 	_finish_turn(res)
 	return res
 
@@ -274,6 +279,7 @@ func try_move(src: int, dst: int) -> Dictionary:
 	res["events"].append({"t": "move", "from": src, "to": dst})
 	var steps: Array = MergeRules.resolve(b, {dst: true}, -1, 0)
 	_apply_steps(res, steps)
+	_record_progress(res)
 	_finish_turn(res)
 	return res
 
@@ -297,6 +303,7 @@ func try_current(axis: int, index: int, dir: int) -> Dictionary:
 	res["events"].append({"t": "shift", "axis": axis, "index": index, "dir": dir})
 	var steps: Array = MergeRules.resolve(b, dirty, -1, 0)
 	_apply_steps(res, steps)
+	_record_progress(res)
 	_finish_turn(res)
 	return res
 
@@ -325,6 +332,18 @@ func try_release(cell: int) -> Dictionary:
 	profile.unseen_residents.append(rid)
 	run.stats["releases"] += 1
 	res["events"].append({"t": "release", "cell": cell, "code": code, "resident_id": rid})
+	# Update 3: this release may finish the Lantern Ray's request and count toward a daily goal.
+	# Everything below is written by the single save() at the end, so a reload can never see
+	# the release without the resident or the resident without the finished request.
+	if Visitor.on_release(profile, code):
+		var ray_id: int = profile.next_resident_id
+		profile.next_resident_id += 1
+		var ray_code: int = Creature.make(Creature.RAY, GameConfig.VISITOR_RESIDENT_TIER)
+		profile.residents.append({"id": ray_id, "code": ray_code, "family": Creature.RAY, "tier": GameConfig.VISITOR_RESIDENT_TIER, "run": run.run_number})
+		profile.unseen_residents.append(ray_id)
+		res["visitor_complete"] = true
+		res["events"].append({"t": "visitor_arrives", "resident_id": ray_id})
+	res["goals_done"].append_array(DailyGoals.record(profile, "release", 1))
 	save()
 	return res
 
@@ -391,6 +410,30 @@ func acknowledge_residents() -> void:
 		profile.unseen_residents = []
 		save()
 
+# --- Visitor, goals, trial (Update 3) --------------------------------------------------------
+
+## Tap the Lantern Ray: accept its request (only while a window is open and none is active).
+func accept_visitor() -> Dictionary:
+	var r: Dictionary = Visitor.accept(profile, GameClock.now())
+	if bool(r["ok"]):
+		save()
+	return r
+
+## Keep the daily goals on today's local date (midnight rollover). In memory; saved with the next action.
+func ensure_daily() -> bool:
+	return DailyGoals.ensure_day(profile, GameClock.now())
+
+## First clear of the Tide Trial pays a small reward once; repeats pay nothing. One write.
+func claim_trial_reward() -> Dictionary:
+	if bool(profile.trial.get("claimed", false)):
+		return {"coins": 0, "pearls": 0, "first": false}
+	profile.trial["cleared"] = true
+	profile.trial["claimed"] = true
+	profile.coins += GameConfig.TRIAL_REWARD_COINS
+	profile.pearls += GameConfig.TRIAL_REWARD_PEARLS
+	save()
+	return {"coins": GameConfig.TRIAL_REWARD_COINS, "pearls": GameConfig.TRIAL_REWARD_PEARLS, "first": true}
+
 # --- Internals -------------------------------------------------------------------
 
 static func _changed_cells(before: PackedInt32Array, after: PackedInt32Array) -> Dictionary:
@@ -437,9 +480,27 @@ func _apply_steps(res: Dictionary, steps: Array) -> void:
 		res["refund"] = true
 		res["events"].append({"t": "refund"})
 
+## Daily goals and the Lantern Ray's progress come from COMMITTED events only (never from a
+## preview): the merges this action produced and whether it used a Current.
+func _record_progress(res: Dictionary) -> void:
+	var merges: int = 0
+	var used_current: bool = false
+	for ev in res["events"]:
+		var t: String = String(ev["t"])
+		if t == "pair" or t == "merge":
+			merges += 1
+			if Visitor.on_merge(profile, int(ev["code"])):
+				res["visitor_created"] = true
+		elif t == "shift":
+			used_current = true
+	if merges > 0:
+		res["goals_done"].append_array(DailyGoals.record(profile, "merges", merges))
+	if used_current:
+		res["goals_done"].append_array(DailyGoals.record(profile, "current", 1))
+
 func _finish_turn(res: Dictionary) -> void:
 	run.turn += 1
-	if run.turn % GameConfig.SURGE_CADENCE == 0:
+	if run.surge_enabled and run.turn % GameConfig.SURGE_CADENCE == 0:
 		_prepare_surge(res)
 	save()
 

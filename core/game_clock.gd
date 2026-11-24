@@ -48,6 +48,12 @@ static func set_tz_bias_seconds(seconds_east: int) -> void:
 static func tz_bias_seconds() -> int:
 	if _tz_override:
 		return _tz_bias
+	if OS.has_feature("web"):
+		# The engine's web port does not reliably know the browser's zone; ask the browser.
+		# getTimezoneOffset() is minutes WEST of UTC, so negate it for seconds east.
+		var js: Variant = JavaScriptBridge.eval("-(new Date().getTimezoneOffset()) * 60", true)
+		if js != null:
+			return int(js)
 	return int(Time.get_time_zone_from_system().get("bias", 0)) * 60
 
 ## Local calendar fields for a unix time: year, month, day, hour, minute, second, weekday.

@@ -41,6 +41,8 @@ your reef. Godot 4.3, typed GDScript, GL Compatibility renderer.
    | `--fresh` | delete the save first |
    | `--save=NAME` | use `user://NAME.json` instead of the default slot |
    | `--speed=X` | animation speed multiplier |
+   | `--clock=YYYY-MM-DDTHH:MM` | start the game clock at that LOCAL time, then run normally (tide phases, visitor windows, goals, offline chest) |
+   | `--tz=MINUTES` | treat local time as this many minutes east of UTC (e.g. `--tz=0`) |
 
    e.g. `godot --path . -- --seed=42 --fresh`
 
@@ -74,20 +76,46 @@ Special merges, resolved automatically after your action:
 * Tier 6 is the cap: a merge that would exceed it is not eligible (a tier 6 pair,
   three tier 5s in a line, three tier 6s side by side all stay as they are).
 
+## The reef, tides, visitors and goals (Updates 2 and 3)
+
+* **Reef hub** (start screen, and the *Reef* button in the pool). The aquarium sits on top; below it the income strip,
+  tabs *Residents* (every resident, newest first with a NEW tag), *Decor*, *Goals*, *Trial*, and one big
+  Play / Resume / Back button. Residents earn passive coins: `5 x 1.8^(tier-1)` per hour each, times
+  `1 + Beauty/100`. Fractions carry; income is settled at the old rate before a release or purchase.
+* **Offline chest.** Time away is banked (not paid live) up to **8 hours in total**, however often you relaunch.
+  Claiming pays and clears it in one save; claiming twice pays once.
+* **Decorations.** Five (coral fan 120, bubble column 450, sea lantern 1200, sunken statue 3000, light shaft 7000
+  coins). Pick one, tap a marked spot, see cost and income change, then buy. A repeat press never double-charges.
+* **Tides** (local time): Dawn 06-10, Midday 10-17, Dusk 17-21, Night 21-06. The reef is lit to match. Each new run
+  records its phase's spawn bias (Dawn Shrimp, Midday more tier 2, Dusk Starfish, Night slightly more tier 3) and keeps
+  it for the whole run, even across a phase change or a reload.
+* **Lantern Ray** visits during the first 90 minutes of Dawn and Dusk. Tap it to accept: make a tier 4+ creature of
+  the featured family (Shrimp at Dawn, Starfish at Dusk), then release it. The request survives reload and the window
+  closing. Finishing grants one permanent Lantern Ray resident, once.
+* **Tide Trial** (Trial tab): a fixed board, 2 moves, one Current. Wrap row 3 round the edge to make a three in a
+  row. Hint button (unlimited), free retries, +150 coins +3 pearls for the first clear only. It runs on its own
+  session: a suspended pool is untouched and nothing earned in the Trial counts toward merges or goals.
+* **Daily goals** (Goals tab): make 8 merges, use a Current, release a tier 4+. Each pays once per local day when it
+  completes and resets at local midnight.
+
 ## Where things are
 
 ```
-config/game_config.gd   ALL tunables: board size, spawn weights, surge cadence,
-                        starting Currents, rewards, chain multiplier, timings,
-                        the first-run starter layout
+config/game_config.gd   ALL tunables: board, spawn weights, surge cadence, Currents, rewards, chain
+                        rounding, reef income (5 x 1.8^(tier-1), Beauty), offline cap, decoration
+                        prices/Beauty, tide phases and spawn biases, visitor window, trial budget/reward,
+                        daily goals, timings, the first-run starter layout
 core/                   rules, state and save, no UI:
-  board.gd creature.gd merge_rules.gd rewards.gd seeded_rng.gd
-  run_state.gd profile.gd save_store.gd game_session.gd (action front door)
+  board creature merge_rules rewards seeded_rng        board + rules
+  run_state profile save_store game_session            state, versioned atomic save (v3), action front door
+  game_clock reef_economy                              injectable clock; passive income, offline chest, decor
+  tide visitor daily_goals tide_trial                  Update 3 systems
 ui/                     screens and widgets (all drawn procedurally; no art assets)
-tests/test_core.gd      headless rules tests (133 checks)
-dev/                    playtest driver, balance simulation, export_web.sh
-docs/                   the exported web build (GitHub Pages), screenshots
-export_presets.cfg      Web export: no threads (works on Pages), installable PWA, portrait
+  main pool_screen reef_hub summary_screen             screens (the hub is the start screen AND the reef)
+  board_view reef_view roster_view gate_view ...       widgets;  creature_art decor_art = vector art
+tests/                  headless rules tests (test_core, test_reef, test_tide) and save fixtures (v1, v2)
+dev/                    playtest driver, perf benchmark, balance simulation, run scripts
+docs/                   exported web build (GitHub Pages) and screenshots
 ```
 
 `GameSession` is the single entry point for actions. Each action is resolved
@@ -125,18 +153,18 @@ The brief left some details open; these are the choices made:
 ## Tests
 
 ```bash
-GODOT=/path/to/godot dev/run_tests.sh                 # 133 rules checks, headless
-GODOT=/path/to/godot dev/run_playtest.sh tutorial     # live UI with injected input + screenshots (needs xvfb-run)
-GODOT=/path/to/godot dev/run_playtest.sh layout 320x568 --fresh
+GODOT=/path/to/godot dev/run_tests.sh            # headless rules/economy/tide tests (320 checks)
+GODOT=/path/to/godot dev/run_playtest.sh tutorial 405x720 --fresh   # live UI with injected input + screenshots (needs xvfb-run)
+GODOT=/path/to/godot dev/run_u2_checkpoint.sh    # Update 2: real session + 4 relaunches with the clock moved forward
+GODOT=/path/to/godot dev/run_u3_checkpoint.sh    # Update 3: visitor across relaunches, v1/v2 saves in the v3 build
+GODOT=/path/to/godot dev/run_perf.sh . [baseline-dir]   # same benchmark on any checkout
 ```
 
-Playtest scenarios (`dev/playtest.gd`): `tutorial`, `reload_check`, `touch`,
-`rules_ui`, `layout`, `tide`, `reduced_motion`, `surge_reload_a/b`,
-`release_reload_a/b`, `free_current`, `full_run`. Screenshots go to `dev/out/`.
-`dev/sim.gd` is a rules-only balance probe.
+Playtest scenarios (`dev/playtest.gd`): `tutorial touch rules_ui tide reduced_motion free_current input layout
+hub_layout hub u2_* u3_tide u3_visitor u3_trial u3_goals u3_layout full_run ...`. Screenshots go to `dev/out/`.
+`dev/sim.gd` is a rules-only balance probe; `dev/perfbench.gd` the benchmark (see `dev/perf/README.md`).
 
-## Not in this milestone
+## Not built yet
 
-Passive income, offline earnings, reef decorations, mutations, tools, goals,
-extra zones, daily systems and monetisation. Coins and pearls are banked but
-have nothing to spend on yet.
+Mutations, tools, additional zones, live services and monetisation. Coins and pearls are banked; coins now
+buy decorations (pearls have no use yet).

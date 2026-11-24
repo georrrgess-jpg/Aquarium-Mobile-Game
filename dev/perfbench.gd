@@ -243,6 +243,8 @@ func scenario_reef() -> void:
 	se.profile.residents = fake_residents(30)
 	se.profile.next_resident_id = 31
 	main.show_screen("start")
+	if str(main.args.get("tab", "")) != "" and main.get("hub") != null:
+		main.hub._show_tab(str(main.args["tab"]))      # experiment: which tab is on screen
 	await frames(30)
 	rec_start()
 	await get_tree().create_timer(10.0).timeout
@@ -274,3 +276,33 @@ func scenario_micro() -> void:
 		for i in n:
 			f.call()
 		print("[bench] micro %-56s %9.1f us/call" % [k, float(Time.get_ticks_usec() - t0) / float(n)])
+
+
+## (Update 3 only) populated reef with the Lantern Ray visiting, all five decorations placed,
+## tide lighting on and a Night overlay: ten seconds idle on the reef hub.
+func scenario_reef_visitor() -> void:
+	var se: GameSession = main.session
+	Engine.max_fps = 60
+	GameClock.set_tz_bias_seconds(0)
+	GameClock.freeze(GameClock.unix_from_local(2026, 11, 24, 6, 40))
+	se.profile.residents = fake_residents(30)
+	se.profile.next_resident_id = 31
+	se.profile.unseen_residents = [30]
+	var slots: Array = [0, 1, 2, 3, 4]
+	se.profile.decorations = []
+	for i in 5:
+		se.profile.decorations.append({"id": String(GameConfig.DECORATIONS[i]["id"]), "slot": int(slots[i])})
+	se.profile.income_stamp = GameClock.now()
+	main._apply_tide(true)
+	main.show_screen("start")
+	await frames(30)
+	rec_start()
+	await get_tree().create_timer(10.0).timeout
+	rec_stop("reef_30_residents_5_decor_visitor_dawn")
+	GameClock.freeze(GameClock.unix_from_local(2026, 11, 24, 23, 0))
+	main._apply_tide(true)
+	main.show_screen("start")
+	await frames(30)
+	rec_start()
+	await get_tree().create_timer(10.0).timeout
+	rec_stop("reef_30_residents_5_decor_night_overlay")

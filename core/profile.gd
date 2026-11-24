@@ -20,6 +20,10 @@ var chest_coins: float = 0.0
 var chest_secs: int = 0
 ## Residents released since the player last looked at the reef (newest highlighted there).
 var unseen_residents: Array = []
+## Update 3: Lantern Ray visitor state, daily goals, Tide Trial first-clear flags.
+var visitor: Dictionary = Visitor.default_state()
+var daily: Dictionary = DailyGoals.default_state()
+var trial: Dictionary = {"cleared": false, "claimed": false}
 
 func to_dict() -> Dictionary:
 	return {
@@ -36,6 +40,9 @@ func to_dict() -> Dictionary:
 		"chest_coins": chest_coins,
 		"chest_secs": chest_secs,
 		"unseen_residents": unseen_residents.duplicate(),
+		"visitor": visitor.duplicate(true),
+		"daily": daily.duplicate(true),
+		"trial": trial.duplicate(true),
 	}
 
 static func from_dict(d: Dictionary) -> Profile:
@@ -71,6 +78,19 @@ static func from_dict(d: Dictionary) -> Profile:
 	p.unseen_residents = []
 	for u in d.get("unseen_residents", []):
 		p.unseen_residents.append(int(u))
+	var v: Dictionary = d.get("visitor", {})
+	p.visitor = {"done": bool(v.get("done", false)), "request": {}}
+	var rq: Dictionary = v.get("request", {})
+	if not rq.is_empty():
+		p.visitor["request"] = {"accepted_at": int(rq.get("accepted_at", 0)), "window_key": String(rq.get("window_key", "")), "family": int(rq.get("family", 0)), "created": bool(rq.get("created", false))}
+	var dl: Dictionary = d.get("daily", {})
+	p.daily = {"day": String(dl.get("day", "")), "progress": {}, "done": {}}
+	for k in dl.get("progress", {}):
+		p.daily["progress"][String(k)] = int(dl["progress"][k])
+	for k in dl.get("done", {}):
+		p.daily["done"][String(k)] = bool(dl["done"][k])
+	var tr: Dictionary = d.get("trial", {})
+	p.trial = {"cleared": bool(tr.get("cleared", false)), "claimed": bool(tr.get("claimed", false))}
 	return p
 
 func tier_counts() -> Dictionary:

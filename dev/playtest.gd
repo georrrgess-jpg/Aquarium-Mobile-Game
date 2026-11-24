@@ -19,6 +19,10 @@ func _ready() -> void:
 	var scenario: String = str(main.args.get("scenario", "smoke"))
 	use_touch = main.args.has("touch")
 	print("[playtest] scenario=%s touch=%s window=%s viewport=%s" % [scenario, use_touch, DisplayServer.window_get_size(), get_viewport().get_visible_rect().size])
+	if not has_method("scenario_" + scenario):
+		print("[playtest] FAIL unknown scenario '%s'" % scenario)
+		get_tree().quit(2)
+		return
 	await call("scenario_" + scenario)
 	print("[playtest] done: %d checks, %d failures, wall %.1fs" % [checks, failures, Time.get_ticks_msec() / 1000.0 - _t0])
 	get_tree().quit(1 if failures > 0 else 0)
@@ -98,7 +102,7 @@ func drag(a: Vector2, b: Vector2, steps: int = 8) -> void:
 func idle() -> void:
 	# wait until the pool has finished animating / previewing
 	var guard: int = 0
-	while main.pool_screen.busy and guard < 2000:
+	while (main.pool_screen.busy or (main.trial_screen.busy and not main.trial_screen.results_panel.visible)) and guard < 2000:
 		await get_tree().process_frame
 		guard += 1
 	await frames(3)
@@ -942,6 +946,11 @@ func check_hub_layout(label: String) -> void:
 			var intended: bool = (keys[i] == "chest" and keys[j] == "claim")     # Claim sits on the banner by design
 			if not intended and (rects[keys[i]] as Rect2).intersection(rects[keys[j]]).get_area() > 1.0:
 				bad.append("%s overlaps %s" % [keys[i], keys[j]])
+	if h.visitor_banner.visible and h.visitor_banner.line_count() > 2:
+		bad.append("visitor banner text wraps to %d lines" % h.visitor_banner.line_count())
+	var toast_rect: Rect2 = Rect2(h.toast.get_global_rect().position, Vector2(h.toast.size.x, 60.0))
+	if toast_rect.intersects(h.reef.get_global_rect()):
+		bad.append("hub toasts would cover the aquarium")
 	for ck in ["coins", "pearls", "res"]:
 		if not (named[ck] as HudWidgets.Chip).text_fits():
 			bad.append("chip %s '%s' does not fit" % [ck, (named[ck] as HudWidgets.Chip).value])
@@ -1100,3 +1109,348 @@ func fake_residents(n: int) -> Array:
 		var tier: int = 4 + (i % 3)
 		out.append({"id": i + 1, "code": Creature.make(fam, tier), "family": fam, "tier": tier, "run": 1})
 	return out
+
+# --- Update 3 ------------------------------------------------------------------------------------------
+
+func at(h: int, m: int = 0, day_offset: int = 0) -> int:
+	return GameClock.unix_from_local(2026, 11, 24, h, m) + day_offset * 86400
+
+func color_close(a: Color, b: Color) -> bool:
+	return absf(a.r - b.r) + absf(a.g - b.g) + absf(a.b - b.b) < 0.02
+
+## All four tide phases on the reef; a phase change during an active run.
+func scenario_u3_tide() -> void:
+	GameClock.set_tz_bias_seconds(0)
+	var se: GameSession = session()
+	for spec in [[7, 0, 0], [12, 0, 1], [18, 0, 2], [23, 0, 3]]:
+		GameClock.freeze(at(int(spec[0]), int(spec[1])))
+		main._apply_tide(true)
+		main.show_screen("start")
+		await frames(12)
+		var phase: int = int(spec[2])
+		var pal: Dictionary = Tide.palette(phase)
+		check(main.hub.tide_badge.phase == phase and color_close(main.hub.reef.palette["top"], pal["top"]), "%s: badge and reef lighting switch to the %s palette" % [Tide.phase_name(phase), Tide.phase_name(phase)])
+		check(color_close(main.hub.reef.palette["bottom"], pal["bottom"]), "%s: water gradient applied" % Tide.phase_name(phase))
+		await shot("u3_hub_%s_%d" % [Tide.phase_name(phase).to_lower(), DisplayServer.window_get_size().x])
+	# a run records its tide; a later phase change does not touch it
+	GameClock.freeze(at(12, 0))
+	main.show_screen("start")
+	await click_btn(main.hub.btn_play)                 # starts run 1 at Midday
+	check(se.run.tide == Tide.MIDDAY and str(se.run.spawn_table) == str(Tide.spawn_table(Tide.MIDDAY)), "a new run records Midday and its spawn weights")
+	var table: String = str(se.run.spawn_table)
+	GameClock.freeze(at(18, 0))                        # tide changes while the run is active
+	await get_tree().create_timer(1.3).timeout
+	check(main._phase == Tide.DUSK and color_close(pool().reef_peek.palette["top"], Tide.palette(Tide.DUSK)["top"]), "the pool's reef strip and the screen background follow the phase change live")
+	check(se.run.tide == Tide.MIDDAY and str(se.run.spawn_table) == table, "the active run keeps its Midday weights")
+	await shot("u3_pool_dusk_bg")
+	await click_btn(pool().btn_home)
+	check(main.hub.tide_badge.phase == Tide.DUSK, "the reef shows Dusk")
+	# next run uses the new phase
+	se.end_run()
+	se.start_run()
+	check(se.run.tide == Tide.DUSK and str(se.run.spawn_table) == str(Tide.spawn_table(Tide.DUSK)), "a NEW run picks up Dusk")
+	GameClock.reset()
+
+## The Lantern Ray: arrival, acceptance inside the window, progress, completion after the window closes.
+func scenario_u3_visitor() -> void:
+	GameClock.set_tz_bias_seconds(0)
+	var se: GameSession = session()
+	GameClock.freeze(at(12, 0))
+	main.show_screen("start")
+	await frames(8)
+	check(not main.hub.visitor_banner.visible and not bool(main.hub.reef.visitor.get("visible", false)), "no visitor at midday")
+	GameClock.freeze(at(6, 30))
+	main.hub.refresh("start")
+	await frames(10)
+	check(main.hub.visitor_banner.visible and bool(main.hub.reef.visitor["visible"]) and main.hub.btn_accept.visible, "the Lantern Ray is offered in the first 90 minutes of Dawn")
+	await shot("u3_visitor_arriving")
+	await get_tree().create_timer(2.6).timeout
+	await shot("u3_visitor_arrived")
+	var ray_pos: Vector2 = main.hub.reef.get_global_rect().position + main.hub.reef.visitor_rect().get_center()
+	await click(ray_pos)                                # tap the visitor itself
+	check(Visitor.has_request(se.profile) and int(se.profile.visitor["request"]["family"]) == 1, "tapping the Lantern Ray accepts a request for Shrimp (Dawn's featured family)")
+	check(main.hub.visitor_banner.text.begins_with("Step 1"), "the reef shows progress and explains the goal ('%s')" % main.hub.visitor_banner.text)
+	check(not main.hub.btn_accept.visible, "no second accept button once accepted")
+	await shot("u3_visitor_accepted")
+	await click_btn(main.hub.btn_play)                 # start a pool
+	GameClock.freeze(at(8, 15))                        # window closed
+	var rows: Array = [". . . . . .", "S3 . . . . S3", ". . . . . .", ". . . . . ."]
+	load_board(rows_board(rows), 0, 2)
+	check(pool().prompt_label.text.find("Lantern Ray wants a tier 4+ Shrimp") >= 0, "the pool prompt carries the request ('%s')" % pool().prompt_label.text)
+	check(not Visitor.window_at()["open"] and Visitor.has_request(se.profile), "window closed; request still active")
+	await drag(cell_center(i_(1, 0)), cell_center(i_(1, 5)))    # make a tier 4 Shrimp
+	await idle()
+	check(se.profile.visitor["request"]["created"], "making the tier 4 Shrimp after the window closed progresses the request")
+	check(pool().toast.visible and pool().toast.label.text.find("Lantern Ray") >= 0, "the pool says what to do next ('%s')" % pool().toast.label.text.replace("\n", " | "))
+	await shot("u3_visitor_progress_pool")
+	await drag(cell_center(i_(1, 5)), gate_center())
+	await idle()
+	var rays: int = 0
+	for r in se.profile.residents:
+		if int(r["family"]) == Creature.RAY:
+			rays += 1
+	check(rays == 1 and bool(se.profile.visitor["done"]), "releasing it grants exactly one permanent Lantern Ray resident")
+	check(pool().toast.label.text.find("joins your reef") >= 0, "completion is announced")
+	await click_btn(pool().btn_reef)
+	await frames(10)
+	await click_btn(main.hub.tab_buttons[0])
+	check(se.profile.unseen_residents.size() == 2, "the ray and the Shrimp are both highlighted as new")
+	await shot("u3_visitor_roster")
+	check(not main.hub.visitor_banner.visible, "the visitor banner is gone once it lives in the reef")
+	main.hub.leave()
+	GameClock.reset()
+
+## Process-level: accept before close (A), finish after close on a relaunch (B), relaunch again (C).
+func scenario_u3_visitor_a() -> void:
+	GameClock.set_tz_bias_seconds(0)
+	var se: GameSession = session()
+	main.hub.refresh("start")
+	check(Visitor.offered(se.profile), "offered at launch time (06:30 by --clock)")
+	await click(main.hub.btn_accept.get_global_rect().get_center())
+	check(Visitor.has_request(se.profile), "accepted")
+	await click_btn(main.hub.btn_play)
+	load_board(rows_board([". . . . . .", "S3 . . . . S3"]), 0, 2)
+	await drag(cell_center(i_(1, 0)), cell_center(i_(1, 5)))
+	await idle()
+	check(se.profile.visitor["request"]["created"], "tier 4 Shrimp made; request at step 2")
+	var snap: Dictionary = snapshot()
+	var f := FileAccess.open(out_dir + "/expected_u3_visitor.json", FileAccess.WRITE)
+	f.store_string(JSON.stringify(snap))
+	f.close()
+
+func scenario_u3_visitor_b() -> void:
+	var se: GameSession = session()
+	var stage: int = int(main.args.get("stage", 1))
+	if stage == 1:
+		check(not Visitor.window_at()["open"], "[B] relaunched at 09:00: the window has closed")
+		check(Visitor.has_request(se.profile) and se.profile.visitor["request"]["created"], "[B] the accepted request and its progress survived the reload")
+		await click_btn(main.hub.btn_play)
+		await drag(cell_center(i_(1, 5)), gate_center())
+		await idle()
+		var rays: int = 0
+		for r in se.profile.residents:
+			if int(r["family"]) == Creature.RAY:
+				rays += 1
+		check(rays == 1 and bool(se.profile.visitor["done"]), "[B] finished after the window closed: exactly one ray")
+	else:
+		var rays2: int = 0
+		for r in se.profile.residents:
+			if int(r["family"]) == Creature.RAY:
+				rays2 += 1
+		check(rays2 == 1 and bool(se.profile.visitor["done"]) and not Visitor.has_request(se.profile), "[C] after another reload: still exactly one ray, nothing duplicated")
+		check(se.profile.residents.size() == 2, "[C] the roster holds the Shrimp and the ray (%d)" % se.profile.residents.size())
+		main.hub.refresh("start")
+		check(not main.hub.visitor_banner.visible, "[C] the visitor does not come back")
+		await click_btn(main.hub.tab_buttons[0])
+		await shot("u3_roster_with_ray")
+
+## The Tide Trial from the reef hub, with a regular run suspended.
+func scenario_u3_trial() -> void:
+	GameClock.set_tz_bias_seconds(0)
+	GameClock.freeze(at(12, 0))
+	var se: GameSession = session()
+	await click_btn(main.hub.btn_play)                  # regular run (starter layout)
+	await tap_cells(i_(4, 1), i_(4, 2))
+	var reg: Dictionary = snapshot()
+	var coins0: int = se.profile.coins
+	await click_btn(pool().btn_home)
+	check(main.current == "start" and main.hub.btn_play.text == "Resume run", "hub offers Resume run for the suspended pool")
+	await click_btn(main.hub.tab_buttons[3])
+	await shot("u3_trial_tab")
+	await click_btn(main.hub.btn_trial)
+	check(main.current == "trial" and main.trial_screen.visible and main.trial_screen.trial_mode, "the Trial opens")
+	var tp: PoolScreen = main.trial_screen
+	var goals_before: String = str(se.profile.daily)
+	check(tp.trial.moves_left == GameConfig.TRIAL_BUDGET and str(tp.session.run.board.to_array()) != str(reg["board"]), "the Trial uses its own fixed board and a visible move budget")
+	check(tp.chip_coins.value == "2 / 2" and tp.prompt_label.text.find("wrap") >= 0, "HUD shows moves ('%s') and the goal" % tp.chip_coins.value)
+	await shot("u3_trial_start")
+	# hint: repeatable, points at row 3
+	await click_btn(tp.btn_hint)
+	check(tp.board_view.hint_line.get("axis", -1) == Board.AXIS_ROW and tp.board_view.hint_line.get("index", -1) == 2, "the hint marks the relevant row")
+	await shot("u3_trial_hint")
+	await click_btn(tp.btn_hint)
+	check(tp.board_view.hint_line.get("index", -1) == 2, "the hint can be used again")
+	# fail: two wasted moves
+	var t_board: Board = tp.session.run.board
+	await drag(tp.board_view.cell_center_global(i_(0, 1)), tp.board_view.cell_center_global(i_(0, 2)))
+	await idle()
+	check(tp.trial.moves_left == 1, "a move spent: 1 left")
+	await drag(tp.board_view.cell_center_global(i_(0, 2)), tp.board_view.cell_center_global(i_(0, 3)))
+	await idle()
+	check(tp.trial.status == TideTrial.LOST and tp.results_panel.visible, "out of moves: results shown")
+	await shot("u3_trial_lost")
+	check(se.profile.coins == coins0, "a failed attempt pays nothing")
+	await click(tp.btn_res_retry.get_global_rect().get_center())
+	check(tp.trial.status == TideTrial.PLAYING and tp.trial.moves_left == 2 and not tp.results_panel.visible and tp.trial.attempts == 2, "retry is free: fresh board and budget (attempt %d)" % tp.trial.attempts)
+	# win with the wrap: pick row 3, direction left, confirm
+	await click_btn(tp.btn_current)
+	await click(tp.board_view.get_global_transform() * Vector2(BoardView.TAB * 0.5, BoardView.TAB + 2.5 * tp.board_view.cs))
+	await click_btn(tp.btn_dir_a)
+	check(tp.board_view.line_preview.get("info", {}).get("steps", []).size() == 1, "the Current preview shows the line the wrap makes")
+	await shot("u3_trial_preview")
+	await click_btn(tp.btn_confirm)
+	check(tp.trial.status == TideTrial.WON and tp.results_panel.visible, "the wrapped Current wins the Trial")
+	check(se.profile.coins == coins0 + GameConfig.TRIAL_REWARD_COINS and bool(se.profile.trial["claimed"]), "first-clear reward paid once (%d coins)" % GameConfig.TRIAL_REWARD_COINS)
+	await shot("u3_trial_won")
+	# trial turns are not farmable: no daily goal, merge payout or run stat moved
+	check(str(se.profile.daily) == goals_before and se.profile.coins == coins0 + GameConfig.TRIAL_REWARD_COINS, "trial moves never count toward daily goals or merge rewards")
+	# the suspended regular run is untouched
+	check(str(se.run.board.to_array()) == str(reg["board"]) and se.run.turn == int(reg["turn"]) and se.run.currents == int(reg["currents"]), "the suspended regular run (board, turn, Currents) is exactly as it was")
+	# return directly to the reef
+	await click(tp.btn_res_back.get_global_rect().get_center())
+	check(main.current == "start" and main.hub.visible, "'Return to the reef' goes straight to the reef")
+	check(main.hub.btn_play.text == "Resume run", "and the regular pool can still be resumed")
+	# replay: no second reward
+	await click_btn(main.hub.tab_buttons[3])
+	await click_btn(main.hub.btn_trial)
+	var coins1: int = se.profile.coins
+	await click_btn(tp.btn_current)
+	await click(tp.board_view.get_global_transform() * Vector2(BoardView.TAB * 0.5, BoardView.TAB + 2.5 * tp.board_view.cs))
+	await click_btn(tp.btn_dir_a)
+	await click_btn(tp.btn_confirm)
+	check(tp.trial.status == TideTrial.WON and se.profile.coins == coins1, "replaying and winning again pays nothing")
+	await click(tp.btn_res_back.get_global_rect().get_center())
+	await click_btn(main.hub.btn_play)
+	check(main.current == "pool" and str(se.run.board.to_array()) == str(reg["board"]), "Resume run returns to the exact suspended board")
+
+## Daily goals from real actions, shown on the Goals tab; midnight rollover while the hub is open.
+func scenario_u3_goals() -> void:
+	GameClock.set_tz_bias_seconds(-8 * 3600)
+	GameClock.freeze(GameClock.unix_from_local(2026, 11, 24, 23, 59, 40))
+	var se: GameSession = session()
+	se.profile.coins = 0
+	main.hub.refresh("start")
+	await click_btn(main.hub.tab_buttons[2])
+	check(DailyGoals.progress(se.profile, "merges") == 0, "goals start at 0")
+	await shot("u3_goals_empty")
+	await click_btn(main.hub.btn_play)
+	load_board(rows_board(["S1 . . . . S1", ". . . . . .", "F4 . . . . ."]), 0, 2)
+	await drag(cell_center(i_(0, 0)), cell_center(i_(0, 5)))
+	await idle()
+	check(DailyGoals.progress(se.profile, "merges") == 1, "a committed merge counts")
+	await click_btn(pool().btn_current)
+	await click(tab_pos(Board.AXIS_ROW, 2))
+	await click_btn(pool().btn_dir_a)
+	check(DailyGoals.progress(se.profile, "current") == 0, "previewing a Current does not count")
+	await click_btn(pool().btn_confirm)
+	check(DailyGoals.is_done(se.profile, "current") and pool().toast.label.text.find("Goal complete") >= 0, "using a Current completes its goal and says so")
+	await shot("u3_goal_toast")
+	var c1: int = se.profile.coins
+	await drag(cell_center(i_(2, 5)), gate_center())              # the F4 wrapped to (2,5)
+	await idle()
+	check(DailyGoals.is_done(se.profile, "release") and se.profile.coins >= c1 + 100, "releasing a tier 4+ completes its goal")
+	await click_btn(pool().btn_reef)
+	await click_btn(main.hub.tab_buttons[2])
+	await shot("u3_goals_progress")
+	# midnight rollover with the hub open
+	GameClock.freeze(GameClock.unix_from_local(2026, 11, 25, 0, 0, 20))
+	await get_tree().create_timer(1.4).timeout
+	check(DailyGoals.progress(se.profile, "merges") == 0 and not DailyGoals.is_done(se.profile, "release") and String(se.profile.daily["day"]) == "2026-11-25", "at local midnight the goals reset for the new day")
+	check(se.run != null, "the active run is untouched by the rollover")
+	await shot("u3_goals_after_midnight")
+	GameClock.reset()
+
+## Layout/overlap for every Update 3 screen at the viewport this process launched with.
+func scenario_u3_layout() -> void:
+	GameClock.set_tz_bias_seconds(0)
+	var se: GameSession = session()
+	se.profile.residents = fake_residents(26)
+	se.profile.next_resident_id = 27
+	se.profile.coins = 98765432
+	se.profile.decorations = [{"id": "coral_fan", "slot": 1}, {"id": "sea_lantern", "slot": 4}]
+	var tag: String = "%dx%d" % [DisplayServer.window_get_size().x, DisplayServer.window_get_size().y]
+	for spec in [[6, 30, "dawn+visitor"], [23, 0, "night"], [17, 20, "dusk+visitor"]]:
+		GameClock.freeze(at(int(spec[0]), int(spec[1])))
+		se.profile.income_stamp = GameClock.now() - 5 * 3600
+		se.profile.visitor = Visitor.default_state()
+		if String(spec[2]).begins_with("dusk"):
+			se.profile.visitor["request"] = {"accepted_at": GameClock.now(), "window_key": "x", "family": 2, "created": true}
+		se.settle_income()
+		main._apply_tide(true)
+		main.show_screen("start")
+		await frames(10)
+		for tab in 4:
+			await click_btn(main.hub.tab_buttons[tab])
+			check_hub_layout("%s tab %d %s" % [spec[2], tab, tag])
+			await shot("U3H_%s_tab%d_%s" % [String(spec[2]).replace("+", "_"), tab, tag])
+	# the Trial screen
+	main.show_screen("trial")
+	await frames(10)
+	var tp: PoolScreen = main.trial_screen
+	var named: Dictionary = {"coins": tp.chip_coins, "turn": tp.chip_turn, "currents": tp.chip_currents, "surge": tp.surge_strip, "home": tp.btn_home, "motion": tp.btn_motion,
+		"sound": tp.btn_sound, "board": tp.board_view, "prompt": tp.prompt_panel, "current": tp.btn_current, "hint": tp.btn_hint, "retry": tp.btn_retry}
+	check_named_layout(named, "trial " + tag)
+	await shot("U3T_trial_" + tag)
+	await click_btn(tp.btn_current)
+	await click(tp.board_view.get_global_transform() * Vector2(BoardView.TAB * 0.5, BoardView.TAB + 2.5 * tp.board_view.cs))
+	await click_btn(tp.btn_dir_a)
+	named["dir_a"] = tp.btn_dir_a
+	named["dir_b"] = tp.btn_dir_b
+	named["confirm"] = tp.btn_confirm
+	check_named_layout(named, "trial preview " + tag)
+	await click_btn(tp.btn_confirm)
+	var rp: Rect2 = tp.results_panel.get_global_rect()
+	check(tp.results_panel.visible and get_viewport().get_visible_rect().encloses(rp), "trial results panel fits on screen (%s)" % tag)
+	var kids_ok: bool = true
+	for c in [tp.btn_res_retry, tp.btn_res_back]:
+		kids_ok = kids_ok and rp.encloses((c as Control).get_global_rect()) and (c as PillButton).content_fits()
+	check(kids_ok, "results buttons fit inside the panel")
+	await shot("U3T_results_" + tag)
+	GameClock.reset()
+
+func check_named_layout(named: Dictionary, label: String) -> void:
+	var vp: Rect2 = get_viewport().get_visible_rect()
+	var rects: Dictionary = {}
+	for k in named:
+		var c: Control = named[k]
+		if c.is_visible_in_tree():
+			rects[k] = c.get_global_rect()
+	var bad: PackedStringArray = PackedStringArray()
+	for k in rects:
+		if not vp.grow(0.5).encloses(rects[k]):
+			bad.append("%s off screen" % k)
+	var keys: Array = rects.keys()
+	for i in keys.size():
+		for j in range(i + 1, keys.size()):
+			if (rects[keys[i]] as Rect2).intersection(rects[keys[j]]).get_area() > 1.0:
+				bad.append("%s overlaps %s" % [keys[i], keys[j]])
+	for k in named:
+		var c2: Control = named[k]
+		if c2 is PillButton and c2.is_visible_in_tree() and not (c2 as PillButton).content_fits():
+			bad.append("button %s '%s' content does not fit" % [k, (c2 as PillButton).text])
+		if c2 is HudWidgets.Chip and c2.is_visible_in_tree() and not (c2 as HudWidgets.Chip).text_fits():
+			bad.append("chip %s does not fit" % k)
+	check(bad.is_empty(), "layout[%s] %d elements, no overlap, on screen%s" % [label, rects.size(), "" if bad.is_empty() else " -> " + "; ".join(bad)])
+
+## An earlier-version save, copied, opened in the Update 3 build and played.
+func scenario_u3_migrate() -> void:
+	var se: GameSession = session()
+	check(se.run != null and se.profile.residents.size() > 0, "earlier save loaded: run present, %d resident(s), %d coins" % [se.profile.residents.size(), se.profile.coins])
+	check(se.run.tide == -1 and se.run.spawn_table.is_empty(), "its run has no tide and keeps the base spawn table")
+	main.show_screen("start")
+	await frames(10)
+	check(main.hub.btn_play.text == "Resume run" and main.hub.tab_buttons.size() == 4, "hub shows Resume run and all four tabs")
+	await shot("u3_migrated_hub")
+	for tab in 4:
+		await click_btn(main.hub.tab_buttons[tab])
+	await click_btn(main.hub.btn_play)
+	var mv: Array = any_legal_move(se)
+	var t0: int = se.run.turn
+	await drag(cell_center(mv[0]), cell_center(mv[1]))
+	await idle()
+	check(se.run.turn == t0 + 1, "the old run is playable")
+	var doc: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(se.save_path))
+	check(int(doc["version"]) == 3 and doc["run"].has("tide") and doc["profile"].has("visitor"), "saved back as version 3")
+
+
+## Settings carry into the Trial (it runs on a throwaway profile).
+func scenario_u3_trial_settings() -> void:
+	var se: GameSession = session()
+	se.set_setting("reduced_motion", true)
+	se.set_setting("sound", false)
+	main.show_screen("trial")
+	await frames(6)
+	var tp: PoolScreen = main.trial_screen
+	check(tp.reduced_motion and tp.board_view.reduced_motion, "the Trial honours the real reduced-motion setting")
+	check(not main.sfx.enabled, "and the real sound setting")
+	check(tp.session.profile != se.profile, "(the trial itself runs on a separate profile)")

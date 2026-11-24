@@ -113,7 +113,7 @@ func _process(delta: float) -> void:
 	_t += delta
 	_since_draw += delta
 	# gentle idle motion: the small strip under the pool needs far fewer redraws than the hub
-	if _since_draw >= (1.0 / (12.0 if compact else 20.0)):
+	if _since_draw >= (1.0 / (12.0 if compact else 15.0)):
 		_since_draw = 0.0
 		_dyn.queue_redraw()
 
@@ -278,6 +278,10 @@ func _draw_static(ci: Layer) -> void:
 	ci.draw_colored_polygon(sand2, pal["sand2"])
 	_draw_rock(ci, Vector2(w * 0.04, sand + h * 0.03), h * 0.12)
 	_draw_rock(ci, Vector2(w * 0.97, sand + h * 0.04), h * 0.15)
+	# tide tint over the water (drawn once here, not re-blended on every animated frame)
+	var ov: Color = pal["overlay"]
+	if ov.a > 0.0:
+		ci.draw_rect(Rect2(Vector2.ZERO, size), ov)
 	# still decorations
 	for d in decorations:
 		var kind: int = _kind_of(String(d["id"]))
@@ -357,9 +361,6 @@ func _draw_dynamic(ci: Layer) -> void:
 	# Update 3 visitor
 	if bool(visitor.get("visible", false)):
 		_draw_visitor(ci, t)
-	var ov: Color = palette["overlay"]
-	if ov.a > 0.0:
-		ci.draw_rect(Rect2(Vector2.ZERO, size), ov)
 
 func _draw_visitor(ci: Layer, t: float) -> void:
 	var pos: Vector2 = _visitor_pos()

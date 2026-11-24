@@ -8,7 +8,10 @@ var failed: int = 0
 const SAVE_A: String = "user://test_save_a.json"
 
 func _initialize() -> void:
+	GameClock.set_tz_bias_seconds(0)
+	GameClock.freeze(1795000000 + 12 * 3600)     # fixed tide phase so seeded Surges are repeatable
 	_run_all()
+	GameClock.reset()
 	print("\n==== %d passed, %d failed ====" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -26,10 +29,18 @@ func _fresh(rows: Array, turn: int = 0, currents: int = 2, path: String = SAVE_A
 	var s := GameSession.new()
 	s.save_path = path
 	s.start_run(Board.from_text(rows))
+	_goals_done(s)
 	s.run.turn = turn
 	s.run.currents = currents
 	s.run.tutorial = false
 	return s
+
+## These older tests assert exact balances; daily goal rewards have their own tests (test_tide.gd).
+func _goals_done(s: GameSession) -> void:
+	var done: Dictionary = {}
+	for g in GameConfig.DAILY_GOALS:
+		done[String(g["id"])] = true
+	s.profile.daily = {"day": GameClock.local_day_key(), "progress": {}, "done": done}
 
 func _i(r: int, c: int) -> int:
 	return Board.idx(r, c)
@@ -129,6 +140,7 @@ func t_starter_layout_opening_chain() -> void:
 	var s := GameSession.new()
 	s.save_path = path
 	s.start_run()
+	_goals_done(s)
 	check(s.run.tutorial and s.run.board.creature_count() == GameConfig.START_CREATURES, "first run: starter layout, 12 creatures")
 	check(s.run.currents == 2, "two starting Currents")
 	var has_family: Dictionary = {}
@@ -540,6 +552,7 @@ func t_starter_first_run_reachability() -> void:
 	var s2 := GameSession.new()
 	s2.save_path = path
 	s2.start_run()
+	_goals_done(s2)
 	s2.try_pair(_i(4, 1), _i(4, 2))        # opening merge + chain -> S3 at (4,2)
 	var r2: Dictionary = s2.try_pair(_i(4, 2), _i(6, 4))   # S3 + S3 -> S4
 	check(r2["ok"] and s2.run.board.code_at(_i(6, 4)) == _code("S", 4), "pair route to tier 4 is reachable on turn 2")

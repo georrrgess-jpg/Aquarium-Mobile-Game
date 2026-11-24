@@ -54,7 +54,26 @@ static func migrate(doc: Dictionary) -> Dictionary:
 		return {}
 	if v == 1:
 		doc = _v1_to_v2(doc)
+		v = 2
+	if v == 2:
+		doc = _v2_to_v3(doc)
 	return doc
+
+## Update 2 -> Update 3: visitor, daily goals and trial flags appear, empty. An active run
+## from before tides keeps rolling on the base spawn table (tide -1).
+static func _v2_to_v3(doc: Dictionary) -> Dictionary:
+	var out: Dictionary = doc.duplicate(true)
+	var prof: Dictionary = out.get("profile", {})
+	prof["visitor"] = prof.get("visitor", Visitor.default_state())
+	prof["daily"] = prof.get("daily", DailyGoals.default_state())
+	prof["trial"] = prof.get("trial", {"cleared": false, "claimed": false})
+	out["profile"] = prof
+	var run: Variant = out.get("run")
+	if typeof(run) == TYPE_DICTIONARY:
+		(run as Dictionary)["tide"] = (run as Dictionary).get("tide", -1)
+		(run as Dictionary)["spawn_table"] = (run as Dictionary).get("spawn_table", [])
+	out["version"] = 3
+	return out
 
 ## Update 1 -> Update 2: reef income fields appear. The income clock starts at the
 ## moment of upgrade (no retroactive windfall); everything else is carried over untouched.

@@ -79,6 +79,39 @@ const DECORATIONS: Array = [
 ## Marked placement spots on the reef floor: x as a fraction of the aquarium width.
 const DECOR_SLOTS: Array = [0.10, 0.27, 0.44, 0.61, 0.78, 0.92]
 
+# --- Tide cycles, visitor, trial, daily goals (Update 3) --------------------------------------
+## Local-time phases: 0 Dawn, 1 Midday, 2 Dusk, 3 Night. Hour each phase STARTS (Night runs 21:00-06:00).
+const TIDE_START_HOURS: Dictionary = {0: 6, 1: 10, 2: 17, 3: 21}
+## One readable spawn bias per phase. A rule multiplies the base weight of matching entries;
+## family 0 = any family, tier 0 = any tier. Both starter families always stay available.
+const TIDE_SPAWN_RULES: Dictionary = {
+	0: [{"family": 1, "tier": 0, "mult": 1.5}],      # Dawn: Shrimp favoured
+	1: [{"family": 0, "tier": 2, "mult": 1.8}],      # Midday: more mixed tier 2
+	2: [{"family": 2, "tier": 0, "mult": 1.5}],      # Dusk: Starfish favoured
+	3: [{"family": 0, "tier": 3, "mult": 1.7}],      # Night: slightly more tier 3
+}
+## The family a phase features (visitor requests ask for it). Midday and Night feature none.
+const TIDE_FEATURED_FAMILY: Dictionary = {0: 1, 2: 2}
+
+## The Lantern Ray visits during the first N minutes of these phases.
+const VISITOR_PHASES: Array = [0, 2]
+const VISITOR_WINDOW_MINUTES: int = 90
+const VISITOR_RESIDENT_TIER: int = 4
+const VISITOR_REQUEST_MIN_TIER: int = 4
+
+## Tide Trial: fixed board, move budget, one Current, a small first-clear reward.
+const TRIAL_BUDGET: int = 2
+const TRIAL_CURRENTS: int = 1
+const TRIAL_REWARD_COINS: int = 150
+const TRIAL_REWARD_PEARLS: int = 3
+
+## Daily goals, reset at local midnight; each pays once per local day when it completes.
+const DAILY_GOALS: Array = [
+	{"id": "merges", "label": "Make 8 merges", "target": 8, "coins": 60, "pearls": 1},
+	{"id": "current", "label": "Use a Current", "target": 1, "coins": 40, "pearls": 0},
+	{"id": "release", "label": "Release a tier 4+ creature", "target": 1, "coins": 100, "pearls": 2},
+]
+
 # --- Seeds ---------------------------------------------------------------------
 const DEFAULT_BASE_SEED: int = 20260101
 
@@ -93,5 +126,5 @@ const T_FLOOD_NOTICE: float = 1.8
 const DRAG_THRESHOLD: float = 10.0
 
 # --- Persistence ---------------------------------------------------------------
-const SAVE_VERSION: int = 2
+const SAVE_VERSION: int = 3
 const SAVE_PATH: String = "user://tidepool_save.json"

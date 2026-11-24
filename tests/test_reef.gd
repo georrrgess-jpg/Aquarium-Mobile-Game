@@ -40,6 +40,10 @@ func _session(tiers: Array) -> GameSession:
 	s.profile = _profile_with(tiers)
 	s.profile.income_stamp = GameClock.now()
 	s.start_run(Board.from_text(["S1 . . . . ."]))
+	var done: Dictionary = {}
+	for g in GameConfig.DAILY_GOALS:
+		done[String(g["id"])] = true
+	s.profile.daily = {"day": GameClock.local_day_key(), "progress": {}, "done": done}   # goals have their own tests
 	s.profile.runs_started = 5
 	return s
 

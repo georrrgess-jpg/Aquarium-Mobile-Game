@@ -7,6 +7,7 @@ extends Control
 signal open_reef
 signal open_home
 signal run_flooded
+signal trial_exit
 
 const GATE_W: float = 84.0
 const GAP: float = 8.0
@@ -14,6 +15,9 @@ const PAD: float = 10.0
 const MAX_COL_W: float = 540.0
 
 var session: GameSession
+## Settings (motion, sound, haptics) always come from the REAL profile, also in the Trial
+## whose own session carries a throwaway profile.
+var settings_session: GameSession
 var sfx: Sfx
 var reduced_motion: bool = false
 var anim_speed: float = 1.0
@@ -64,10 +68,22 @@ var prompt_panel: Panel
 var prompt_label: Label
 var toast: HudWidgets.Toast
 var fx_layer: Control
+## Tide Trial mode: the same pool UI on a separate, fixed board and its own session.
+var trial_mode: bool = false
+var trial: TideTrial = null
+var claim_reward: Callable = Callable()      # set by Main: pays the first-clear reward on the REAL profile
+var btn_hint: PillButton
+var btn_retry: PillButton
+var results_panel: Panel
+var results_title: Label
+var results_body: Label
+var btn_res_retry: PillButton
+var btn_res_back: PillButton
 var chain_label: Label
 
 func setup(s: GameSession, audio: Sfx) -> void:
 	session = s
+	settings_session = s
 	sfx = audio
 	_build()
 
@@ -151,6 +167,45 @@ func _build() -> void:
 		chip_currents.punch_now()
 		toast.show_text("Chain! +1 Current", 1.2))
 	board_view.chain_cue.connect(_on_chain_cue)
+	btn_hint = _btn("Hint", "hint", Pal.GOLD)
+	btn_retry = _btn("Retry", "retry", Pal.CORAL)
+	btn_hint.visible = false
+	btn_retry.visible = false
+	btn_hint.pressed.connect(_on_trial_hint)
+	btn_retry.pressed.connect(_on_trial_retry)
+	results_panel = Panel.new()
+	var rsb := StyleBoxFlat.new()
+	rsb.bg_color = Color(0.04, 0.2, 0.26, 0.97)
+	rsb.border_color = Pal.CORAL
+	rsb.set_border_width_all(3)
+	rsb.set_corner_radius_all(20)
+	results_panel.add_theme_stylebox_override("panel", rsb)
+	results_panel.visible = false
+	add_child(results_panel)
+	results_title = Label.new()
+	results_title.add_theme_font_size_override("font_size", 30)
+	results_title.add_theme_color_override("font_color", Pal.GOLD)
+	results_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	results_panel.add_child(results_title)
+	results_body = Label.new()
+	results_body.add_theme_font_size_override("font_size", 18)
+	results_body.add_theme_color_override("font_color", Pal.TEXT)
+	results_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	results_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	results_panel.add_child(results_body)
+	btn_res_retry = PillButton.new()
+	btn_res_retry.accent = Pal.CORAL
+	btn_res_retry.filled = true
+	btn_res_retry.font_size = 20
+	results_panel.add_child(btn_res_retry)
+	btn_res_retry.pressed.connect(_on_trial_retry)
+	btn_res_back = PillButton.new()
+	btn_res_back.accent = Pal.SAND
+	btn_res_back.text = "Return to the reef"
+	btn_res_back.icon = "reef"
+	btn_res_back.font_size = 18
+	results_panel.add_child(btn_res_back)
+	btn_res_back.pressed.connect(func() -> void: trial_exit.emit())
 	resized.connect(_layout)
 
 func _chip(icon: String, label: String, accent: Color) -> HudWidgets.Chip:
@@ -252,6 +307,37 @@ func _layout() -> void:
 	for b in [btn_home, btn_reef, btn_motion, btn_sound, btn_current, btn_dir_a, btn_dir_b, btn_confirm, btn_tide]:
 		(b as PillButton).font_size = 19
 	btn_tide.font_size = 18
+	# Trial mode: no balances, Reef Gate or reef strip; Hint / Retry take the strip's place
+	gate.visible = not trial_mode
+	reef_peek.visible = not trial_mode
+	chip_pearls.visible = not trial_mode
+	btn_reef.visible = not trial_mode
+	btn_hint.visible = trial_mode
+	btn_retry.visible = trial_mode
+	if trial_mode:
+		chip_coins.size = Vector2(chip_w * 2.0 + g, chip_h)
+		btn_home.icon = "x"
+		var strip: Rect2 = Rect2(reef_peek.position, reef_peek.size)
+		var bh: float = minf(64.0, strip.size.y)
+		btn_hint.position = strip.position
+		btn_hint.size = Vector2((strip.size.x - 8.0) * 0.5, bh)
+		btn_retry.position = strip.position + Vector2((strip.size.x + 8.0) * 0.5, 0)
+		btn_retry.size = Vector2((strip.size.x - 8.0) * 0.5, bh)
+		btn_hint.font_size = 22
+		btn_retry.font_size = 22
+	else:
+		btn_home.icon = "home"
+	var rw: float = iw * 0.92
+	results_panel.size = Vector2(rw, 250)
+	results_panel.position = Vector2((w - rw) * 0.5, board_view.position.y + 90.0)
+	results_title.position = Vector2(10, 16)
+	results_title.size = Vector2(rw - 20.0, 40)
+	results_body.position = Vector2(20, 64)
+	results_body.size = Vector2(rw - 40.0, 80)
+	btn_res_retry.position = Vector2(20, 152)
+	btn_res_retry.size = Vector2(rw - 40.0, 40)
+	btn_res_back.position = Vector2(20, 198)
+	btn_res_back.size = Vector2(rw - 40.0, 40)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
@@ -261,9 +347,34 @@ func _notification(what: int) -> void:
 
 # --- Entering the screen --------------------------------------------------------------
 
+func set_trial(t: TideTrial) -> void:
+	trial_mode = true
+	trial = t
+	session = t.session
+	board_view.session = session
+	board_view.gate = null                    # no Reef Gate in the Trial
+	_layout()
+
+func _enter_trial() -> void:
+	session = trial.session
+	board_view.session = session
+	board_view.clear_selection()
+	cur_mode = false
+	board_view.mode_current = false
+	_clear_line()
+	board_view.hint_line = {}
+	board_view.sync(session.run.board)
+	results_panel.visible = false
+	busy = false
+	board_view.interactive = true
+	_refresh_all()
+
 func enter() -> void:
 	_layout()
 	_apply_motion_setting()
+	if trial_mode:
+		_enter_trial()
+		return
 	board_view.session = session
 	cur_mode = false
 	_clear_line()
@@ -289,7 +400,7 @@ func _process(delta: float) -> void:
 
 ## Called by Main once a second after passive income was settled in memory.
 func on_income_tick() -> void:
-	if not visible or busy or _pearls_in_flight > 0 or session == null:
+	if trial_mode or not visible or busy or _pearls_in_flight > 0 or session == null:
 		return
 	if _shown_coins != session.profile.coins:
 		_shown_coins = session.profile.coins
@@ -314,6 +425,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _refresh_all() -> void:
 	_state_version += 1
+	if trial_mode:
+		_refresh_hud()
+		_update_buttons()
+		_update_prompt()
+		return
 	if _pearls_in_flight == 0:
 		_shown_coins = session.profile.coins
 		_shown_pearls = session.profile.pearls
@@ -329,6 +445,17 @@ func _refresh_all() -> void:
 	gate.residents = session.profile.residents.size()
 
 func _refresh_hud() -> void:
+	if trial_mode:
+		chip_coins.icon = "tide"
+		chip_coins.label = "Moves left"
+		chip_coins.value = "%d / %d" % [trial.moves_left, GameConfig.TRIAL_BUDGET]
+		chip_turn.label = "Attempt"
+		chip_turn.value = str(trial.attempts)
+		chip_currents.value = "x%d" % session.run.currents
+		surge_strip.custom_text = trial.goal_text()
+		surge_strip.incoming = []
+		surge_strip.refresh()
+		return
 	chip_coins.value = fmt_hud(_shown_coins)
 	chip_pearls.value = fmt_hud(_shown_pearls)
 	var run: RunState = session.run
@@ -359,7 +486,7 @@ static func _fmt(n: int) -> String:
 	return out
 
 func _apply_motion_setting() -> void:
-	reduced_motion = bool(session.profile.settings.get("reduced_motion", false))
+	reduced_motion = bool(settings_session.profile.settings.get("reduced_motion", false))
 	board_view.reduced_motion = reduced_motion
 	board_view.anim_speed = anim_speed
 	gate.reduced_motion = reduced_motion
@@ -367,19 +494,19 @@ func _apply_motion_setting() -> void:
 	surge_strip.reduced_motion = reduced_motion
 	btn_motion.icon = "motion_off" if reduced_motion else "motion"
 	btn_motion.toggled = reduced_motion
-	var snd: bool = bool(session.profile.settings.get("sound", true))
+	var snd: bool = bool(settings_session.profile.settings.get("sound", true))
 	sfx.enabled = snd
-	Haptics.enabled = bool(session.profile.settings.get("haptics", true))
+	Haptics.enabled = bool(settings_session.profile.settings.get("haptics", true))
 	Haptics.reduced_motion = reduced_motion
 	btn_sound.icon = "sound" if snd else "sound_off"
 
 func _toggle_motion() -> void:
-	session.set_setting("reduced_motion", not bool(session.profile.settings.get("reduced_motion", false)))
+	settings_session.set_setting("reduced_motion", not bool(settings_session.profile.settings.get("reduced_motion", false)))
 	_apply_motion_setting()
 	toast.show_text("Reduced motion %s" % ("on" if reduced_motion else "off"), 1.2)
 
 func _toggle_sound() -> void:
-	session.set_setting("sound", not bool(session.profile.settings.get("sound", true)))
+	settings_session.set_setting("sound", not bool(settings_session.profile.settings.get("sound", true)))
 	_apply_motion_setting()
 
 func _update_buttons() -> void:
@@ -436,6 +563,18 @@ func _update_prompt() -> void:
 	board_view.hint_line = {}
 	gate.hint = false
 	var text: String = ""
+	if trial_mode and not cur_mode and board_view.selected < 0:
+		if trial.status == TideTrial.WON:
+			text = "Cleared! The wrap made your three in a row."
+		elif trial.status == TideTrial.LOST:
+			text = "Out of moves. Retry is free."
+		else:
+			text = "Goal: wrap a Current round the edge to make three in a row. %d move%s left." % [trial.moves_left, "" if trial.moves_left == 1 else "s"]
+		prompt_label.text = text
+		board_view.hint_line = board_view.hint_line
+		board_view._over.queue_redraw()
+		board_view._under.queue_redraw()
+		return
 	if run.status != RunState.ACTIVE:
 		text = "The pool has flooded."
 	elif not run.pending_surge.is_empty():
@@ -485,7 +624,7 @@ func _cached_hint() -> Dictionary:
 const TIP_PER_FRAME: int = 4
 
 func _advance_tip_scan() -> void:
-	if _tip_done or busy or cur_mode or board_view.selected >= 0 or session.run == null or session.run.status != RunState.ACTIVE:
+	if trial_mode or _tip_done or busy or cur_mode or board_view.selected >= 0 or session.run == null or session.run.status != RunState.ACTIVE:
 		return
 	if _hint_cache_version != _state_version:
 		return
@@ -509,6 +648,8 @@ func _advance_tip_scan() -> void:
 			return
 
 func _is_stuck() -> bool:
+	if trial_mode:
+		return false
 	if _stuck_cache_version != _state_version:
 		_stuck_cache = session.is_stuck()
 		_stuck_cache_version = _state_version
@@ -524,6 +665,8 @@ func _coach_hint() -> Dictionary:
 		var c: int = b.code_at(i)
 		if c != 0 and Creature.tier_of(c) >= GameConfig.RELEASE_MIN_TIER:
 			out["text"] = "Tier %d! Send it through the Reef Gate to keep it forever." % Creature.tier_of(c)
+			if Visitor.has_request(session.profile) and Creature.family_of(c) == int(session.profile.visitor["request"]["family"]) and bool(session.profile.visitor["request"]["created"]):
+				out["text"] = "Release this one for the Lantern Ray! Drag it to the Reef Gate."
 			out["cells"] = PackedInt32Array([i])
 			out["gate"] = true
 			return out
@@ -542,6 +685,10 @@ func _coach_hint() -> Dictionary:
 				return out
 	# (the "a Current would make a merge right now" tip is found incrementally, see _process)
 	out["text"] = "Merge matching pairs or slide into empty cells. A Surge lands every 3rd turn."
+	if Visitor.has_request(session.profile):
+		var req: Dictionary = session.profile.visitor["request"]
+		if not bool(req["created"]):
+			out["text"] = "Lantern Ray wants a tier %d+ %s. Merge your way up!" % [GameConfig.VISITOR_REQUEST_MIN_TIER, String(Creature.FAMILY_NAMES[int(req["family"])])]
 	return out
 
 # --- Toast / feedback --------------------------------------------------------------------
@@ -600,8 +747,22 @@ func _play_result(res: Dictionary) -> void:
 	_update_buttons()
 	if bool(res["turn_used"]) and cur_mode:
 		_exit_current_mode()
+	var trial_done: bool = false
+	if trial_mode:
+		trial.evaluate(res)                       # resolve once (moves, win/lose), then play the feedback
+		trial_done = trial.status != TideTrial.PLAYING
 	await board_view.play_events(res["events"], session.run.board)
 	_refresh_all()
+	if trial_mode:
+		if trial_done:
+			_show_trial_result()
+			return
+		busy = false
+		board_view.interactive = true
+		_update_buttons()
+		_update_prompt()
+		return
+	_announce_progress(res)
 	if bool(res["flood"]):
 		await _run_flood_sequence()
 		return
@@ -612,6 +773,22 @@ func _play_result(res: Dictionary) -> void:
 	board_view.interactive = true
 	_update_buttons()
 	_update_prompt()
+
+## Goals and Lantern Ray progress arrive with committed actions; say so once the animation is done.
+func _announce_progress(res: Dictionary) -> void:
+	var lines: PackedStringArray = PackedStringArray()
+	for g in res.get("goals_done", []):
+		var rw: String = "+%d coins" % int(g["coins"]) + (" +%d pearl%s" % [int(g["pearls"]), "" if int(g["pearls"]) == 1 else "s"] if int(g["pearls"]) > 0 else "")
+		lines.append("Goal complete: %s  %s" % [g["label"], rw])
+	if bool(res.get("visitor_created", false)):
+		lines.append("Lantern Ray: now release it through the Reef Gate!")
+	if bool(res.get("visitor_complete", false)):
+		lines.append("The Lantern Ray joins your reef!")
+		if sfx != null:
+			sfx.pop(4)
+	if not lines.is_empty():
+		toast.show_text("\n".join(lines), 3.2)
+		chip_coins.punch_now()
 
 func _run_surge_sequence() -> void:
 	busy = true
@@ -811,3 +988,49 @@ func _on_chain_cue(step: int, _pos: Vector2) -> void:
 		tw.tween_property(chain_label, "position:y", chain_label.position.y - 30.0, 0.5 / anim_speed)
 	tw.tween_property(chain_label, "modulate:a", 0.0, 0.25 / anim_speed)
 	tw.tween_callback(func() -> void: chain_label.visible = false)
+
+
+# --- Tide Trial ---------------------------------------------------------------------------------
+
+func _on_trial_hint() -> void:
+	if busy or not trial_mode or trial.status != TideTrial.PLAYING:
+		return
+	var h: Dictionary = trial.hint()
+	board_view.hint_line = {"axis": int(h["axis"]), "index": int(h["index"])}
+	board_view._under.queue_redraw()
+	board_view._over.queue_redraw()
+	toast.show_text("Hint: slide row %d to the LEFT. The edge piece wraps round to the far end." % (int(h["index"]) + 1), 3.2)
+	if sfx != null:
+		sfx.play("select")
+
+func _on_trial_retry() -> void:
+	if not trial_mode or (busy and not results_panel.visible):
+		return
+	trial.new_attempt()
+	_enter_trial()
+	toast.hide_now()
+
+func _show_trial_result() -> void:
+	board_view.interactive = false
+	var won: bool = trial.status == TideTrial.WON
+	results_title.text = "Cleared!" if won else "Out of moves"
+	var body: String = ""
+	if won:
+		body = "A wrapped Current made your three in a row."
+		if claim_reward.is_valid():
+			var r: Dictionary = claim_reward.call()
+			if bool(r.get("first", false)):
+				body += "\nFirst clear reward: +%d coins, +%d pearls." % [int(r["coins"]), int(r["pearls"])]
+			else:
+				body += "\n(The first-clear reward is already yours.)"
+		btn_res_retry.text = "Play again"
+	else:
+		body = "Hint: shift row 3 left, so the edge piece wraps round. Retries are free."
+		btn_res_retry.text = "Try again"
+	btn_res_retry.icon = "retry"
+	results_body.text = body
+	results_panel.visible = true
+	if sfx != null:
+		sfx.pop(4 if won else 0)
+	if won:
+		Haptics.release()

@@ -179,6 +179,35 @@ static func draw_icon(ci: CanvasItem, kind: String, c: Vector2, s: float, col: C
 			ci.draw_circle(c, h, Color("e8f4ff"))
 			ci.draw_circle(c + Vector2(-h * 0.25, -h * 0.25), h * 0.35, Color(1, 1, 1, 0.95))
 			ci.draw_arc(c, h, 0.2, 2.9, 12, Color("9cc7ff"), maxf(1.5, s * 0.1), true)
+		"dawn":      # half sun over a horizon
+			ci.draw_arc(c + Vector2(0, h * 0.35), h * 0.7, PI, TAU, 14, col, maxf(2.0, s * 0.14), true)
+			ci.draw_line(c + Vector2(-h, h * 0.35), c + Vector2(h, h * 0.35), col, maxf(2.0, s * 0.12), true)
+			for k in 3:
+				var a: float = PI + (float(k) + 0.5) * PI / 3.0
+				ci.draw_line(c + Vector2(0, h * 0.35) + Vector2(cos(a), sin(a)) * h * 0.85, c + Vector2(0, h * 0.35) + Vector2(cos(a), sin(a)) * h * 1.1, col, maxf(2.0, s * 0.1), true)
+		"sun":
+			ci.draw_circle(c, h * 0.5, col)
+			for k in 8:
+				var a2: float = float(k) * TAU / 8.0
+				ci.draw_line(c + Vector2(cos(a2), sin(a2)) * h * 0.72, c + Vector2(cos(a2), sin(a2)) * h * 1.05, col, maxf(2.0, s * 0.1), true)
+		"dusk":      # sun sinking below the horizon line
+			ci.draw_arc(c + Vector2(0, h * 0.1), h * 0.62, PI, TAU, 14, col, maxf(2.0, s * 0.14), true)
+			ci.draw_line(c + Vector2(-h, h * 0.1), c + Vector2(h, h * 0.1), col, maxf(2.0, s * 0.12), true)
+			ci.draw_line(c + Vector2(-h * 0.6, h * 0.45), c + Vector2(h * 0.6, h * 0.45), col, maxf(2.0, s * 0.1), true)
+			ci.draw_line(c + Vector2(-h * 0.3, h * 0.8), c + Vector2(h * 0.3, h * 0.8), col, maxf(2.0, s * 0.1), true)
+		"moon":      # crescent
+			ci.draw_circle(c, h * 0.8, col)
+			ci.draw_circle(c + Vector2(h * 0.4, -h * 0.25), h * 0.7, Color(0.04, 0.2, 0.3))
+		"goal":
+			ci.draw_arc(c, h * 0.85, 0.0, TAU, 20, col, maxf(2.0, s * 0.12), true)
+			ci.draw_arc(c, h * 0.5, 0.0, TAU, 16, col, maxf(2.0, s * 0.12), true)
+			ci.draw_circle(c, h * 0.18, col)
+		"hint":
+			ci.draw_circle(c + Vector2(0, -h * 0.15), h * 0.62, col)
+			ci.draw_rect(Rect2(c + Vector2(-h * 0.28, h * 0.4), Vector2(h * 0.56, h * 0.32)), col)
+		"retry":
+			ci.draw_arc(c, h * 0.7, 0.6, TAU - 0.2, 16, col, maxf(2.5, s * 0.14), true)
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(h * 0.55, -h * 0.9), c + Vector2(h * 0.95, -h * 0.2), c + Vector2(h * 0.15, -h * 0.3)]), col)
 		"tide":
 			ci.draw_polyline(PackedVector2Array([c + Vector2(-h, -h * 0.4), c + Vector2(0, h * 0.5), c + Vector2(h, -h * 0.4)]), col, maxf(2.5, s * 0.16), true)
 			ci.draw_polyline(PackedVector2Array([c + Vector2(-h, h * 0.1), c + Vector2(0, h), c + Vector2(h, h * 0.1)]), col, maxf(2.5, s * 0.16), true)

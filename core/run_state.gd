@@ -15,6 +15,12 @@ var status: int = ACTIVE
 var pending_surge: Array = []
 var flood_info: Dictionary = {}
 var run_number: int = 1
+## Update 3: the tide phase and spawn weights this run was created with ([[family, tier, weight]]).
+## They never change for the life of the run. -1 / empty = a run from before tides (base table).
+var tide: int = -1
+var spawn_table: Array = []
+## Trial boards turn the Surge cycle off.
+var surge_enabled: bool = true
 var tutorial: bool = false
 var elapsed: float = 0.0
 var stats: Dictionary = {}
@@ -46,6 +52,8 @@ func to_dict() -> Dictionary:
 		"pending_surge": pending_surge.duplicate(true),
 		"flood_info": flood_info.duplicate(true),
 		"run_number": run_number,
+		"tide": tide,
+		"spawn_table": spawn_table.duplicate(true),
 		"tutorial": tutorial,
 		"elapsed": elapsed,
 		"stats": stats.duplicate(true),
@@ -65,6 +73,10 @@ static func from_dict(d: Dictionary) -> RunState:
 		r.pending_surge.append({"cell": int(p["cell"]), "code": int(p["code"])})
 	r.flood_info = d.get("flood_info", {})
 	r.run_number = int(d.get("run_number", 1))
+	r.tide = int(d.get("tide", -1))
+	r.spawn_table = []
+	for e in d.get("spawn_table", []):
+		r.spawn_table.append([int(e[0]), int(e[1]), int(e[2])])
 	r.tutorial = bool(d.get("tutorial", false))
 	r.elapsed = float(d.get("elapsed", 0.0))
 	var s: Dictionary = RunState.default_stats()

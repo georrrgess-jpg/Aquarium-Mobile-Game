@@ -1,0 +1,73 @@
+######## run 1
+######## .
+--- headless
+[bench] scenario=pool window=(0, 0) viewport=(960, 960) renderer=
+[bench] pool_dense_sequence | frames=917 | frame ms avg 16.67 p50 16.66 p95 17.18 p99 19.94 max 22.97 | frames >20ms: 9, >33ms: 0
+[bench] sequence ended at turn 12, status 0, creatures 34
+[bench] scenario=reef window=(0, 0) viewport=(960, 960) renderer=
+[bench] reef_populated_30_idle | frames=599 | frame ms avg 16.67 p50 16.66 p95 16.78 p99 17.10 max 18.52 | frames >20ms: 0, >33ms: 0
+[bench] pool_with_reef_strip_30_idle | frames=600 | frame ms avg 16.67 p50 16.67 p95 16.78 p99 17.06 max 27.99 | frames >20ms: 3, >33ms: 0
+--- windowed
+[bench] scenario=pool window=(405, 720) viewport=(540, 960) renderer=llvmpipe (LLVM 20.1.2, 256 bits)
+[bench] pool_dense_sequence | frames=608 | frame ms avg 29.54 p50 29.82 p95 41.04 p99 47.47 max 67.21 | frames >20ms: 574, >33ms: 162
+[bench] sequence ended at turn 12, status 0, creatures 34
+[bench] scenario=reef window=(405, 720) viewport=(540, 960) renderer=llvmpipe (LLVM 20.1.2, 256 bits)
+[bench] reef_populated_30_idle | frames=449 | frame ms avg 22.26 p50 16.57 p95 52.37 p99 57.48 max 61.67 | frames >20ms: 180, >33ms: 180
+[bench] pool_with_reef_strip_30_idle | frames=536 | frame ms avg 18.65 p50 21.91 p95 31.81 p99 39.20 max 63.49 | frames >20ms: 318, >33ms: 14
+--- micro (headless)
+[bench] scenario=micro window=(0, 0) viewport=(960, 960) renderer=
+[bench] micro session.is_stuck                                               4.2 us/call
+[bench] micro session.preview_current (one line)                           111.3 us/call
+[bench] micro pool._update_prompt (runs on every selection change)           3.0 us/call
+[bench] micro session.valid_targets                                         27.1 us/call
+[bench] micro session.save (JSON + atomic write)                           370.3 us/call
+[bench] micro pool._refresh_all (runs after every action)                   33.9 us/call
+######## run 2
+######## .
+--- headless
+[bench] scenario=pool window=(0, 0) viewport=(960, 960) renderer=
+[bench] pool_dense_sequence | frames=916 | frame ms avg 16.67 p50 16.67 p95 17.15 p99 19.72 max 20.89 | frames >20ms: 6, >33ms: 0
+[bench] sequence ended at turn 12, status 0, creatures 34
+[bench] scenario=reef window=(0, 0) viewport=(960, 960) renderer=
+[bench] reef_populated_30_idle | frames=599 | frame ms avg 16.67 p50 16.67 p95 16.75 p99 16.99 max 17.91 | frames >20ms: 0, >33ms: 0
+[bench] pool_with_reef_strip_30_idle | frames=599 | frame ms avg 16.67 p50 16.66 p95 16.78 p99 16.92 max 17.91 | frames >20ms: 0, >33ms: 0
+--- windowed
+[bench] scenario=pool window=(405, 720) viewport=(540, 960) renderer=llvmpipe (LLVM 20.1.2, 256 bits)
+[bench] pool_dense_sequence | frames=623 | frame ms avg 28.47 p50 28.82 p95 39.84 p99 44.84 max 57.23 | frames >20ms: 580, >33ms: 146
+[bench] sequence ended at turn 12, status 0, creatures 34
+[bench] scenario=reef window=(405, 720) viewport=(540, 960) renderer=llvmpipe (LLVM 20.1.2, 256 bits)
+[bench] reef_populated_30_idle | frames=480 | frame ms avg 20.86 p50 16.60 p95 50.33 p99 54.95 max 60.44 | frames >20ms: 179, >33ms: 179
+[bench] pool_with_reef_strip_30_idle | frames=573 | frame ms avg 17.47 p50 21.09 p95 29.91 p99 32.88 max 37.85 | frames >20ms: 305, >33ms: 5
+--- micro (headless)
+[bench] scenario=micro window=(0, 0) viewport=(960, 960) renderer=
+[bench] micro session.is_stuck                                               6.3 us/call
+[bench] micro session.preview_current (one line)                           199.1 us/call
+[bench] micro pool._update_prompt (runs on every selection change)           5.1 us/call
+[bench] micro session.valid_targets                                         41.9 us/call
+[bench] micro session.save (JSON + atomic write)                           532.7 us/call
+[bench] micro pool._refresh_all (runs after every action)                   32.3 us/call
+######## run 3
+######## .
+--- headless
+[bench] scenario=pool window=(0, 0) viewport=(960, 960) renderer=
+[bench] pool_dense_sequence | frames=917 | frame ms avg 16.67 p50 16.67 p95 17.24 p99 19.93 max 20.92 | frames >20ms: 8, >33ms: 0
+[bench] sequence ended at turn 12, status 0, creatures 34
+[bench] scenario=reef window=(0, 0) viewport=(960, 960) renderer=
+[bench] reef_populated_30_idle | frames=599 | frame ms avg 16.67 p50 16.67 p95 16.76 p99 17.10 max 22.55 | frames >20ms: 1, >33ms: 0
+[bench] pool_with_reef_strip_30_idle | frames=599 | frame ms avg 16.67 p50 16.67 p95 16.78 p99 17.00 max 17.79 | frames >20ms: 0, >33ms: 0
+--- windowed
+[bench] scenario=pool window=(405, 720) viewport=(540, 960) renderer=llvmpipe (LLVM 20.1.2, 256 bits)
+[bench] pool_dense_sequence | frames=605 | frame ms avg 29.28 p50 29.62 p95 40.79 p99 46.19 max 60.06 | frames >20ms: 560, >33ms: 149
+[bench] sequence ended at turn 12, status 0, creatures 34
+[bench] scenario=reef window=(405, 720) viewport=(540, 960) renderer=llvmpipe (LLVM 20.1.2, 256 bits)
+[bench] reef_populated_30_idle | frames=514 | frame ms avg 19.50 p50 16.59 p95 45.62 p99 51.40 max 62.72 | frames >20ms: 183, >33ms: 183
+[bench] pool_with_reef_strip_30_idle | frames=572 | frame ms avg 17.46 p50 20.87 p95 30.28 p99 32.51 max 61.37 | frames >20ms: 305, >33ms: 3
+--- micro (headless)
+[bench] scenario=micro window=(0, 0) viewport=(960, 960) renderer=
+[bench] micro session.is_stuck                                               4.2 us/call
+[bench] micro session.preview_current (one line)                           123.1 us/call
+[bench] micro pool._update_prompt (runs on every selection change)           3.3 us/call
+[bench] micro session.valid_targets                                         30.4 us/call
+[bench] micro session.save (JSON + atomic write)                           390.9 us/call
+[bench] micro pool._refresh_all (runs after every action)                   39.1 us/call
+FINISHED

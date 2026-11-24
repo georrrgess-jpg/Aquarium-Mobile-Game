@@ -6,6 +6,7 @@ extends Control
 ## decoration shop (Update 3 adds goals and the Tide Trial); nothing covers the aquarium.
 
 signal play_pressed
+signal trial_pressed
 
 const PAD: float = 10.0
 const MAX_COL_W: float = 540.0
@@ -36,6 +37,14 @@ var btn_motion: PillButton
 var btn_sound: PillButton
 var btn_haptics: PillButton
 var toast: HudWidgets.Toast
+var tide_badge: TideBadge
+var visitor_banner: VisitorBanner
+var btn_accept: PillButton
+var goals_list: GoalsList
+var trial_card: TrialCard
+var btn_trial: PillButton
+var _phase: int = -1
+var _visitor_shown: bool = false
 ## extra tabs (Update 3 adds Goals / Trial through register_tab)
 var _tabs: Array = []                 # [{id, label, control}]
 var _active_tab: String = "residents"
@@ -67,6 +76,14 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	btn_claim = _btn("Claim", "coin", Pal.CORAL)
 	btn_claim.filled = true
 	btn_claim.pressed.connect(_claim)
+	tide_badge = TideBadge.new()
+	add_child(tide_badge)
+	visitor_banner = VisitorBanner.new()
+	add_child(visitor_banner)
+	btn_accept = _btn("Accept", "check", Pal.CORAL)
+	btn_accept.filled = true
+	btn_accept.pressed.connect(_accept_visitor)
+	reef.visitor_tapped.connect(_accept_visitor)
 	panel = Panel.new()
 	var psb := StyleBoxFlat.new()
 	psb.bg_color = Pal.PANEL_DARK
@@ -98,9 +115,20 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	btn_buy.pressed.connect(_buy)
 	btn_cancel_buy = _btn("Cancel", "x", Pal.TEXT_DIM, panel)
 	btn_cancel_buy.pressed.connect(_cancel_placement)
+	goals_list = GoalsList.new()
+	goals_list.hub = self
+	panel.add_child(goals_list)
+	trial_card = TrialCard.new()
+	trial_card.hub = self
+	panel.add_child(trial_card)
+	btn_trial = _btn("Start the Tide Trial", "wave", Pal.CORAL, panel)
+	btn_trial.filled = true
+	btn_trial.pressed.connect(func() -> void: trial_pressed.emit())
 	_tabs = [
 		{"id": "residents", "label": "Residents", "controls": [roster_scroll]},
 		{"id": "decor", "label": "Decor", "controls": [decor_list, decor_summary, btn_buy, btn_cancel_buy]},
+		{"id": "goals", "label": "Goals", "controls": [goals_list]},
+		{"id": "trial", "label": "Trial", "controls": [trial_card, btn_trial]},
 	]
 	btn_play = _btn("Play", "wave", Pal.CORAL)
 	btn_play.filled = true
@@ -179,10 +207,13 @@ func _layout() -> void:
 	var iw: float = cw - 2.0 * PAD
 	var g: float = 6.0
 	title_label.clip_text = true
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	title_label.position = Vector2(x0, 2)
-	title_label.size = Vector2(iw, 46)
+	title_label.position = Vector2(x0 + 4.0, 2)
+	title_label.size = Vector2(iw - 150.0, 46)
 	title_label.custom_minimum_size = Vector2(0, 46)
+	tide_badge.position = Vector2(x0 + iw - 144.0, 6)
+	tide_badge.size = Vector2(144, 40)
 	var y: float = 52.0
 	var chip_w: float = (iw - 2.0 * g) / 3.0
 	for i in 3:
@@ -191,7 +222,8 @@ func _layout() -> void:
 		c.size = Vector2(chip_w, 52)
 	y += 52.0 + 8.0
 	var chest_on: bool = ReefEconomy.chest_amount(session.profile) > 0
-	var below: float = 46.0 + 8.0 + (58.0 if chest_on else 0.0) + 42.0 + 6.0 + PANEL_H + 8.0 + 64.0 + 8.0 + 40.0 + 8.0
+	var vis_on: bool = _visitor_visible()
+	var below: float = 46.0 + 8.0 + (58.0 if chest_on else 0.0) + (66.0 if vis_on else 0.0) + 42.0 + 6.0 + PANEL_H + 8.0 + 64.0 + 8.0 + 40.0 + 8.0
 	var aq_h: float = maxf(180.0, h - y - below)
 	reef.position = Vector2(x0, y)
 	reef.size = Vector2(iw, aq_h)
@@ -207,6 +239,14 @@ func _layout() -> void:
 		btn_claim.position = Vector2(x0 + iw - 124.0, y + 5.0)
 		btn_claim.size = Vector2(116, 40)
 		y += 58.0
+	visitor_banner.visible = vis_on
+	btn_accept.visible = vis_on and Visitor.offered(session.profile)
+	if vis_on:
+		visitor_banner.position = Vector2(x0, y)
+		visitor_banner.size = Vector2(iw, 58)
+		btn_accept.position = Vector2(x0 + iw - 108.0, y + 9.0)
+		btn_accept.size = Vector2(100, 40)
+		y += 66.0
 	var tab_w: float = (iw - g * float(_tabs.size() - 1)) / float(maxi(1, _tabs.size()))
 	for i in tab_buttons.size():
 		var b: PillButton = tab_buttons[i]
@@ -227,6 +267,12 @@ func _layout() -> void:
 	btn_buy.size = Vector2(pw * 0.62, 38)
 	btn_cancel_buy.position = Vector2(8.0 + pw * 0.62 + 6.0, PANEL_H - 46.0)
 	btn_cancel_buy.size = Vector2(pw * 0.38 - 6.0, 38)
+	goals_list.position = Vector2(8, 6)
+	goals_list.size = Vector2(pw, PANEL_H - 12.0)
+	trial_card.position = Vector2(8, 6)
+	trial_card.size = Vector2(pw, PANEL_H - 66.0)
+	btn_trial.position = Vector2(8, PANEL_H - 56.0)
+	btn_trial.size = Vector2(pw, 48)
 	y += PANEL_H + 8.0
 	btn_play.position = Vector2(x0, y)
 	btn_play.size = Vector2(iw, 64)
@@ -238,7 +284,7 @@ func _layout() -> void:
 		tb.position = Vector2(x0 + float(i) * (tw + g), y)
 		tb.size = Vector2(tw, 40)
 		tb.font_size = 15
-	toast.position = Vector2(x0 + 20.0, reef.position.y + 20.0)
+	toast.position = Vector2(x0 + 20.0, panel.position.y + 12.0)    # over the tab panel, never over the aquarium
 	toast.size = Vector2(iw - 40.0, 0)
 
 func _notification(what: int) -> void:
@@ -258,6 +304,9 @@ func refresh(new_context: String) -> void:
 	reef.set_decorations(p.decorations)
 	reef.set_highlight(p.unseen_residents.duplicate())
 	_signature = ""
+	session.ensure_daily()
+	_apply_tide(true)
+	_refresh_visitor(true)
 	_refresh_numbers()
 	_refresh_buttons()
 	_show_tab(_active_tab)
@@ -312,6 +361,9 @@ func _refresh_numbers() -> void:
 	income.rate = ReefEconomy.rate_per_hour(p)
 	income.beauty = ReefEconomy.total_beauty(p)
 	income.queue_redraw()
+	goals_list.queue_redraw()
+	trial_card.queue_redraw()
+	btn_trial.text = "Start the Tide Trial" if not bool(p.trial.get("cleared", false)) else "Play the Tide Trial again"
 	chest_banner.amount = ReefEconomy.chest_amount(p)
 	chest_banner.full = ReefEconomy.chest_full(p)
 	chest_banner.secs = p.chest_secs
@@ -322,6 +374,9 @@ func on_income_tick() -> void:
 	if not visible:
 		return
 	var had_chest: bool = chest_banner.visible
+	session.ensure_daily()                      # midnight rollover while the hub is open
+	_apply_tide(false)
+	_refresh_visitor(false)
 	_refresh_numbers()
 	if had_chest != (ReefEconomy.chest_amount(session.profile) > 0):
 		_layout()
@@ -436,6 +491,61 @@ func _buy() -> void:
 	_refresh_numbers()
 	_refresh_decor()
 
+# --- Tide, visitor ------------------------------------------------------------------------------------
+
+## Lighting follows the local tide; a phase change updates the reef and future runs only.
+func _apply_tide(force: bool) -> void:
+	var ph: int = Tide.phase_at()
+	if ph == _phase and not force:
+		tide_badge.queue_redraw()
+		return
+	_phase = ph
+	reef.palette = Tide.palette(ph)
+	tide_badge.phase = ph
+	tide_badge.queue_redraw()
+
+func _visitor_visible() -> bool:
+	var p: Profile = session.profile
+	if bool(p.visitor.get("done", false)):
+		return false
+	return Visitor.has_request(p) or Visitor.offered(p)
+
+func _refresh_visitor(force: bool) -> void:
+	var p: Profile = session.profile
+	var show_it: bool = _visitor_visible()
+	var accepted: bool = Visitor.has_request(p)
+	reef.visitor = {"visible": show_it, "accepted": accepted, "t0": reef._t if (show_it and not _visitor_shown) else float(reef.visitor.get("t0", 0.0))}
+	if show_it != _visitor_shown or force:
+		_visitor_shown = show_it
+		_layout()
+	visitor_banner.accepted = accepted
+	if accepted:
+		visitor_banner.text = Visitor.status_text(p)
+	elif show_it:
+		var fam: int = int(Visitor.window_at()["family"])
+		visitor_banner.text = "Visiting! It wants a tier %d+ %s made in a pool and released through the Gate." % [GameConfig.VISITOR_REQUEST_MIN_TIER, String(Creature.FAMILY_NAMES.get(fam, "creature"))]
+	else:
+		visitor_banner.text = ""
+	visitor_banner.queue_redraw()
+	btn_accept.visible = show_it and Visitor.offered(p)
+	reef._dyn.queue_redraw()
+
+func _accept_visitor() -> void:
+	var p: Profile = session.profile
+	if Visitor.has_request(p):
+		toast.show_text(Visitor.status_text(p), 2.4)
+		return
+	var r: Dictionary = session.accept_visitor()
+	if bool(r["ok"]):
+		toast.show_text("The Lantern Ray's request accepted!\n%s" % Visitor.status_text(p), 2.6)
+		if sfx != null:
+			sfx.pop(3)
+		Haptics.release()
+	else:
+		toast.show_text(String(r["reason"]), 2.0)
+	_refresh_visitor(true)
+	_layout()
+
 # --- Leaving -------------------------------------------------------------------------------------------------
 
 ## The player has looked at the reef: stop highlighting new arrivals.
@@ -532,3 +642,127 @@ class DecorList extends Control:
 			if not owned and not afford:
 				rcol = Pal.RED if not chosen else Pal.CORAL_DARK
 			draw_string(font, Vector2(size.x * 0.5, rc.position.y + 25), right, HORIZONTAL_ALIGNMENT_RIGHT, size.x * 0.5 - 12.0, 18, rcol)
+
+class TideBadge extends Control:
+	var phase: int = 1
+	var _sb: StyleBoxFlat = StyleBoxFlat.new()
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_sb.set_corner_radius_all(14)
+		_sb.set_border_width_all(2)
+		_sb.anti_aliasing = true
+	func _draw() -> void:
+		var pal: Dictionary = Tide.palette(phase)
+		_sb.bg_color = Color(pal["top"]).lerp(Color(pal["bottom"]), 0.55)
+		_sb.border_color = Pal.SAND
+		draw_style_box(_sb, Rect2(Vector2.ZERO, size))
+		var icon: String = ["dawn", "sun", "dusk", "moon"][phase]
+		PillButton.draw_icon(self, icon, Vector2(22, size.y * 0.5), 24.0, Pal.SAND)
+		var font: Font = ThemeDB.fallback_font
+		draw_string(font, Vector2(42, 17), Tide.phase_name(phase), HORIZONTAL_ALIGNMENT_LEFT, size.x - 46.0, 17, Pal.TEXT)
+		var d: Dictionary = GameClock.local_dict()
+		draw_string(font, Vector2(42, 35), "%02d:%02d" % [int(d["hour"]), int(d["minute"])], HORIZONTAL_ALIGNMENT_LEFT, size.x - 46.0, 14, Pal.TEXT_DIM)
+
+class VisitorBanner extends Control:
+	var text: String = ""
+	var accepted: bool = false
+	var _sb: StyleBoxFlat = StyleBoxFlat.new()
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_sb.bg_color = Color("2b3f7a")
+		_sb.set_corner_radius_all(14)
+		_sb.set_border_width_all(3)
+		_sb.anti_aliasing = true
+	func _draw() -> void:
+		_sb.border_color = Pal.CORAL if accepted else Pal.GOLD
+		draw_style_box(_sb, Rect2(Vector2.ZERO, size))
+		CreatureArt.draw_creature(self, Creature.make(Creature.RAY, 4), Vector2(34, size.y * 0.5), 46.0, {"badge": false, "glow": false})
+		var font: Font = ThemeDB.fallback_font
+		var head: String = "Lantern Ray · request accepted" if accepted else "Lantern Ray · visiting now"
+		draw_string(font, Vector2(64, 19), head, HORIZONTAL_ALIGNMENT_LEFT, size.x - 180.0, 15, Pal.GOLD)
+		_wrapped(font, text, Vector2(64, 36), size.x - (74.0 if accepted else 186.0), 14, Pal.TEXT)
+	func line_count() -> int:
+		var font: Font = ThemeDB.fallback_font
+		var width: float = size.x - (74.0 if accepted else 186.0)
+		var n: int = 1
+		var line: String = ""
+		for w in text.split(" "):
+			var trial: String = w if line == "" else line + " " + w
+			if font.get_string_size(trial, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x > width and line != "":
+				n += 1
+				line = w
+			else:
+				line = trial
+		return n
+	func _wrapped(font: Font, t: String, pos: Vector2, width: float, fs: int, col: Color) -> void:
+		var words: PackedStringArray = t.split(" ")
+		var line: String = ""
+		var y: float = pos.y
+		for w in words:
+			var trial: String = w if line == "" else line + " " + w
+			if font.get_string_size(trial, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > width and line != "":
+				draw_string(font, Vector2(pos.x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+				y += fs + 2.0
+				line = w
+			else:
+				line = trial
+		if line != "":
+			draw_string(font, Vector2(pos.x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+
+class GoalsList extends Control:
+	var hub: Control
+	var _sb: StyleBoxFlat = StyleBoxFlat.new()
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_sb.set_corner_radius_all(10)
+		_sb.anti_aliasing = true
+	func _draw() -> void:
+		if hub == null or hub.session == null:
+			return
+		var p: Profile = hub.session.profile
+		var font: Font = ThemeDB.fallback_font
+		draw_string(font, Vector2(4, 18), "Today's goals · they reset at local midnight", HORIZONTAL_ALIGNMENT_LEFT, size.x, 16, Pal.TEXT_DIM)
+		var row_h: float = 62.0
+		for i in GameConfig.DAILY_GOALS.size():
+			var g: Dictionary = GameConfig.DAILY_GOALS[i]
+			var id: String = String(g["id"])
+			var done: bool = DailyGoals.is_done(p, id)
+			var prog: int = DailyGoals.progress(p, id)
+			var rc := Rect2(0, 30.0 + float(i) * (row_h + 6.0), size.x, row_h)
+			_sb.bg_color = Pal.SAND if not done else Pal.SAND.darkened(0.15)
+			_sb.border_color = Pal.GOLD if done else Pal.SAND_DARK
+			_sb.set_border_width_all(3 if done else 2)
+			draw_style_box(_sb, rc)
+			PillButton.draw_icon(self, "check" if done else "goal", rc.position + Vector2(26, row_h * 0.5), 26.0, Pal.TEAL.darkened(0.3) if done else Pal.CORAL_DARK)
+			draw_string(font, rc.position + Vector2(52, 24), String(g["label"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.58, 18, Pal.INK)
+			var rw: String = "+%d coins" % int(g["coins"]) + (" +%d pearl%s" % [int(g["pearls"]), "" if int(g["pearls"]) == 1 else "s"] if int(g["pearls"]) > 0 else "")
+			draw_string(font, rc.position + Vector2(52, 46), "Done · " + rw if done else "Reward: " + rw, HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.62, 14, Pal.SAND_DEEP.darkened(0.5))
+			# progress bar + count (a shape, not only a colour)
+			var bar := Rect2(rc.position.x + size.x * 0.66, rc.position.y + 22.0, size.x * 0.30, 14.0)
+			draw_rect(bar, Pal.INK)
+			var frac: float = clampf(float(prog) / float(g["target"]), 0.0, 1.0)
+			draw_rect(Rect2(bar.position, Vector2(bar.size.x * frac, bar.size.y)), Pal.TEAL if not done else Pal.GOLD)
+			draw_string(font, Vector2(bar.position.x, bar.end.y + 16.0), "%d / %d" % [prog, int(g["target"])], HORIZONTAL_ALIGNMENT_CENTER, bar.size.x, 14, Pal.INK)
+
+class TrialCard extends Control:
+	var hub: Control
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+	func _draw() -> void:
+		if hub == null or hub.session == null:
+			return
+		var p: Profile = hub.session.profile
+		var font: Font = ThemeDB.fallback_font
+		var cleared: bool = bool(p.trial.get("cleared", false))
+		draw_string(font, Vector2(4, 24), "Tide Trial · learn the wraparound", HORIZONTAL_ALIGNMENT_LEFT, size.x, 20, Pal.GOLD)
+		var lines: Array = [
+			"A handcrafted board and just %d moves." % GameConfig.TRIAL_BUDGET,
+			"Slide a row with your one Current so the edge piece",
+			"wraps round and completes a three in a row.",
+			"Free retries and a hint that points at the row.",
+			"Your pool is paused and safe while you try.",
+		]
+		for i in lines.size():
+			draw_string(font, Vector2(4, 52.0 + float(i) * 22.0), String(lines[i]), HORIZONTAL_ALIGNMENT_LEFT, size.x, 16, Pal.TEXT)
+		var status: String = "Cleared. Replay any time (no extra reward)." if cleared else "First clear pays %d coins + %d pearls." % [GameConfig.TRIAL_REWARD_COINS, GameConfig.TRIAL_REWARD_PEARLS]
+		draw_string(font, Vector2(4, 52.0 + 5.0 * 22.0 + 6.0), status, HORIZONTAL_ALIGNMENT_LEFT, size.x, 16, Pal.TEAL if cleared else Pal.CORAL)
