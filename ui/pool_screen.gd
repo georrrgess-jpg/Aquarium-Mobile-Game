@@ -595,6 +595,7 @@ func _refresh_hud() -> void:
 		chip_coins.label = "Guided practice" if help_mode else "Calm Pool"
 		chip_coins.value = "No payout" if help_mode else "No rewards"
 	surge_strip.cadence = run.cadence
+	surge_strip.surge_count = run.surge_size_now()
 	surge_strip.turns_left = run.turns_until_surge()
 	surge_strip.incoming = run.pending_surge
 	surge_strip.refresh()

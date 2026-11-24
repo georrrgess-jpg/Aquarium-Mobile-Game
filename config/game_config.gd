@@ -16,6 +16,12 @@ const START_CREATURES: int = 12
 const START_CURRENTS: int = 2
 const SURGE_CADENCE: int = 3        # a Surge lands after every Nth turn
 const SURGE_SIZE: int = 3           # creatures per Surge (needs this many empty cells)
+## The swell: a standard run's Surge grows later on (+1 from SWELL_START turns, +1 more every
+## SWELL_EVERY turns, at most +SWELL_MAX). Not used by the guided first run, Calm Pool or Trials.
+## Stored on each run when it starts, so changing these never alters a run in progress.
+const SWELL_START: int = 20
+const SWELL_EVERY: int = 20
+const SWELL_MAX: int = 3
 const CURRENT_REFUND_ON_CHAIN: int = 1   # Currents earned by a chain, at most once per turn
 
 ## Natural spawn table: [family, tier, weight]. Used by Surges and by the

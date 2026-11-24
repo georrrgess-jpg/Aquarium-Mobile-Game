@@ -52,6 +52,7 @@ func _run_all() -> void:
 	t_calm()
 	t_trials_solver()
 	t_trial_rewards()
+	t_swell()
 
 # --- Tide Goals ------------------------------------------------------------------------------
 
@@ -433,3 +434,57 @@ func t_trial_rewards() -> void:
 	var t := TideTrial.new("chain")
 	t.new_attempt()
 	check(t.attempts == 2 and t.moves_left == t.budget and t.status == TideTrial.PLAYING, "a retry is free and unlimited")
+
+# --- The swell (Surge growth, Update 4 tuning) -----------------------------------------------
+
+func t_swell() -> void:
+	print("[swell: the Surge grows later in a standard run; runs keep the rules they started with]")
+	var s := _session()
+	check(s.run.swell_start == GameConfig.SWELL_START and s.run.swell_every == GameConfig.SWELL_EVERY and s.run.swell_max == GameConfig.SWELL_MAX, "a standard run records the swell it started with")
+	var r: RunState = s.run
+	var sizes: Array = []
+	for t in [0, 19, 20, 39, 40, 59, 60, 200]:
+		r.turn = t
+		sizes.append(r.surge_size_now())
+	check(sizes == [3, 3, 4, 4, 5, 5, 6, 6], "Surge size by turn: %s (3 until turn 20, then +1 every 20, at most +3)" % str(sizes))
+	var g := GameSession.new()
+	g.autosave = false
+	g.profile.tutorial = {"done": false, "skipped": false, "milestone": false, "restarts": 0}
+	g.start_run()
+	g.run.turn = 100
+	check(g.run.surge_size_now() == 3, "the guided first run never swells")
+	var calm: GameSession = s.calm_session()
+	calm.run.turn = 100
+	check(calm.run.surge_size_now() == 3, "Calm Pool never swells")
+	var t := TideTrial.new("space")
+	t.session.run.turn = 100
+	check(t.session.run.surge_size_now() == 3, "Trials never swell")
+	# a run saved by an older build keeps its old rules
+	var d: Dictionary = s.run.to_dict()
+	d.erase("swell_start")
+	d.erase("swell_every")
+	d.erase("swell_max")
+	var old: RunState = RunState.from_dict(d)
+	old.turn = 100
+	check(old.surge_size_now() == 3, "a run from before the swell stays at 3 for its whole life")
+	# changing the config later does not change a run in progress
+	s.run.swell_start = 5
+	s.run.swell_every = 5
+	s.run.swell_max = 1
+	s.save()
+	var s2 := _reload()
+	check(s2.run.swell_start == 5 and s2.run.swell_every == 5 and s2.run.swell_max == 1, "the run's own swell values survive a reload")
+	# a Surge at turn 30 needs 5 free cells: with 4 it floods and says so
+	var f := _session()
+	f.run.turn = 41
+	var b := Board.new()
+	for i in b.cells.size():
+		b.set_code(i, Creature.make(1 + (i % 2), 6))
+	b.set_code(0, 0)
+	b.set_code(1, 0)
+	b.set_code(2, 0)
+	b.set_code(3, 0)
+	f.run.board = b
+	f.run.turn = 41
+	var res: Dictionary = f.try_move(_i(0, 4), 3)
+	check(bool(res["flood"]) and int(f.run.flood_info["need"]) == 5, "at turn 42 the Surge needs 5 free cells (flood reports need %s)" % str(f.run.flood_info.get("need")))

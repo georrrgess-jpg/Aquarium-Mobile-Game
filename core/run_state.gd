@@ -26,6 +26,12 @@ var surge_enabled: bool = true
 var mode: String = "regular"
 var cadence: int = GameConfig.SURGE_CADENCE
 var surge_size: int = GameConfig.SURGE_SIZE
+## The swell (Update 4 tuning): later in a standard run the Surge grows. From `swell_start` turns on it is
+## surge_size + 1, then +1 more every `swell_every` turns, up to +`swell_max`. Fixed when the run starts
+## (0 = none), so a run keeps the rules it began with even if the config changes.
+var swell_start: int = 0
+var swell_every: int = 0
+var swell_max: int = 0
 ## Guided first run: which steps are done ({pair, current, surge, release}), saved with the board.
 var tut_flags: Dictionary = {}
 ## A restarted guided board: pays no coins/pearls and records no goals until the tutorial finishes.
@@ -72,6 +78,9 @@ func to_dict() -> Dictionary:
 		"mode": mode,
 		"cadence": cadence,
 		"surge_size": surge_size,
+		"swell_start": swell_start,
+		"swell_every": swell_every,
+		"swell_max": swell_max,
 		"tut_flags": tut_flags.duplicate(true),
 		"practice": practice,
 		"goal": goal.duplicate(true),
@@ -97,6 +106,9 @@ static func from_dict(d: Dictionary) -> RunState:
 	r.mode = String(d.get("mode", "regular"))
 	r.cadence = int(d.get("cadence", GameConfig.SURGE_CADENCE))
 	r.surge_size = int(d.get("surge_size", GameConfig.SURGE_SIZE))
+	r.swell_start = int(d.get("swell_start", 0))        # runs saved before the swell keep their old rules
+	r.swell_every = int(d.get("swell_every", 0))
+	r.swell_max = int(d.get("swell_max", 0))
 	r.practice = bool(d.get("practice", false))
 	for k in d.get("tut_flags", {}):
 		r.tut_flags[String(k)] = bool(d["tut_flags"][k])
@@ -115,6 +127,12 @@ static func from_dict(d: Dictionary) -> RunState:
 		s[k] = int(d["stats"][k])
 	r.stats = s
 	return r
+
+## Creatures in the Surge being chosen/shown now, including the swell.
+func surge_size_now() -> int:
+	if swell_max <= 0 or swell_every <= 0 or turn < swell_start:
+		return surge_size
+	return surge_size + mini(swell_max, int((turn - swell_start) / float(swell_every)) + 1)
 
 func turns_until_surge() -> int:
 	return cadence - (turn % cadence)

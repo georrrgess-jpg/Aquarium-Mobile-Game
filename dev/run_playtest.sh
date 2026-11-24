@@ -12,4 +12,4 @@ if [ -n "${HEADLESS:-}" ]; then
 else
   RUN=(xvfb-run -a -s "-screen 0 ${W}x${H}x24" "$GODOT" --rendering-driver opengl3 --path . --resolution "${W}x${H}")
 fi
-"${RUN[@]}" -- --playtest=playtest --scenario="$SCENARIO" --save="${PT_SAVE:-pt_${SCENARIO}}" "$@" 2>&1 | grep -v -E "ALSA|audio_driver|dummy driver|snd_|init_output|initialize \(servers"
+"${RUN[@]}" -- --playtest="${PT_SCRIPT:-playtest}" --scenario="$SCENARIO" --save="${PT_SAVE:-pt_${SCENARIO}}" "$@" 2>&1 | grep -v -E "ALSA|audio_driver|dummy driver|snd_|init_output|initialize \(servers"

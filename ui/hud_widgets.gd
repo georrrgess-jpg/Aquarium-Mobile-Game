@@ -53,6 +53,7 @@ class Chip extends Control:
 
 class SurgeStrip extends Control:
 	var cadence: int = GameConfig.SURGE_CADENCE
+	var surge_count: int = GameConfig.SURGE_SIZE
 	var turns_left: int = 3
 	var incoming: Array = []     # [{cell, code}]
 	var message: String = ""     # flood notice text
@@ -112,7 +113,7 @@ class SurgeStrip extends Control:
 			var txt: String = "in %d turn%s" % [turns_left, "" if turns_left == 1 else "s"]
 			draw_string(font, Vector2(tx, 22), "Next Surge", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Pal.TEXT_DIM)
 			draw_string(font, Vector2(tx, 43), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Pal.TEXT if turns_left > 1 else col)
-			draw_string(font, Vector2(size.x - 190.0, size.y * 0.5 + 6.0), "%d creatures drop on empty cells" % GameConfig.SURGE_SIZE, HORIZONTAL_ALIGNMENT_RIGHT, 180.0, 14, Pal.TEXT_DIM)
+			draw_string(font, Vector2(size.x - 190.0, size.y * 0.5 + 6.0), "%d creatures drop on empty cells" % surge_count, HORIZONTAL_ALIGNMENT_RIGHT, 180.0, 14, Pal.TEXT_DIM)
 
 ## One optional Tide Goal for the standard run, shown as a slim strip above the board.
 class GoalStrip extends Control:

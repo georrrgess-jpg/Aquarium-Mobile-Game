@@ -78,6 +78,9 @@ func start_run(layout: Board = null) -> void:
 	else:
 		run.board = _random_board()
 	if layout == null and not run.tutorial:
+		run.swell_start = GameConfig.SWELL_START
+		run.swell_every = GameConfig.SWELL_EVERY
+		run.swell_max = GameConfig.SWELL_MAX
 		run.goal = TideGoals.pick(run.seed_value, run.spawn_table)      # optional; saved with the run
 	if not run.practice:
 		Book.observe_board(profile, run.board)
@@ -699,21 +702,22 @@ func _finish_turn(res: Dictionary) -> void:
 ## no partial wave.
 func _prepare_surge(res: Dictionary) -> void:
 	var empties: PackedInt32Array = run.board.empty_cells()
-	if empties.size() < run.surge_size and run.mode == "calm":
+	var need: int = run.surge_size_now()
+	if empties.size() < need and run.mode == "calm":
 		# Calm Pool: a full board is a recoverable reset, never a flood
 		run.board = _random_board(GameConfig.CALM_START_CREATURES)
 		res["events"].append({"t": "calm_reset"})
 		res["calm_reset"] = true
 		return
-	if empties.size() < run.surge_size:
+	if empties.size() < need:
 		run.status = RunState.FLOODED
-		run.flood_info = {"free": empties.size(), "need": run.surge_size}
+		run.flood_info = {"free": empties.size(), "need": need}
 		res["flood"] = true
-		res["events"].append({"t": "flood", "free": empties.size(), "need": run.surge_size})
+		res["events"].append({"t": "flood", "free": empties.size(), "need": need})
 		return
 	var pool: Array = Array(empties)
 	var picks: Array = []
-	for i in run.surge_size:
+	for i in need:
 		var j: int = i + run.rng.int_range(0, pool.size() - 1 - i)
 		var tmp: Variant = pool[i]
 		pool[i] = pool[j]
