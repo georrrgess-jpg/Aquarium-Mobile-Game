@@ -20,6 +20,8 @@ var btn_reef: PillButton
 var btn_home: PillButton
 var btn_all: PillButton
 var banked_label: Label
+var band: ResultsBand
+var goal_label: Label
 
 func setup(s: GameSession, audio: Sfx) -> void:
 	session = s
@@ -34,7 +36,11 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	add_child(panel)
 	title_label = _label(34, Pal.TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	title_label.text = "The pool flooded"
-	stats_label = _label(19, Pal.TEXT, HORIZONTAL_ALIGNMENT_LEFT)
+	stats_label = _label(17, Pal.TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER)
+	band = ResultsBand.new()
+	band.screen = self
+	panel.add_child(band)
+	goal_label = _label(17, Pal.TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	banked_label = _label(19, Pal.GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	surv_title = _label(20, Pal.TEAL, HORIZONTAL_ALIGNMENT_LEFT)
 	surv_scroll = ScrollContainer.new()
@@ -44,8 +50,8 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	surv_flow.add_theme_constant_override("h_separation", 8)
 	surv_flow.add_theme_constant_override("v_separation", 8)
 	surv_scroll.add_child(surv_flow)
-	btn_new = _button("Start the next pool", "wave", Pal.CORAL)
-	btn_reef = _button("Visit your reef", "reef", Pal.CORAL)
+	btn_new = _button("Play Again", "wave", Pal.CORAL)
+	btn_reef = _button("Visit Reef", "reef", Pal.CORAL)
 	btn_home = _button("Home", "home", Pal.TEXT_DIM)
 	btn_all = _button("Release all", "reef", Pal.CORAL)
 	btn_new.pressed.connect(func() -> void: new_run_pressed.emit())
@@ -84,29 +90,34 @@ func _layout() -> void:
 	panel.size = Vector2(pw, ph)
 	var m: float = 18.0
 	var iw: float = pw - 2.0 * m
-	title_label.position = Vector2(m, 14)
-	title_label.size = Vector2(iw, 46)
-	stats_label.position = Vector2(m, 66)
-	stats_label.size = Vector2(iw, 262)
-	banked_label.position = Vector2(m, 336)
-	banked_label.size = Vector2(iw, 28)
-	surv_title.position = Vector2(m, 382)
+	title_label.position = Vector2(m, 12)
+	title_label.size = Vector2(iw, 44)
+	stats_label.position = Vector2(m, 56)
+	stats_label.size = Vector2(iw, 46)
+	band.position = Vector2(m, 108)
+	band.size = Vector2(iw, 116)
+	goal_label.position = Vector2(m, 232)
+	goal_label.size = Vector2(iw, 52)
+	banked_label.position = Vector2(m, 292)
+	banked_label.size = Vector2(iw, 26)
+	surv_title.position = Vector2(m, 332)
 	surv_title.size = Vector2(iw - 150.0, 28)
-	btn_all.position = Vector2(pw - m - 140.0, 376)
+	btn_all.position = Vector2(pw - m - 140.0, 328)
 	btn_all.size = Vector2(140, 38)
 	btn_all.font_size = 17
-	surv_scroll.position = Vector2(m, 422)
-	surv_scroll.size = Vector2(iw, maxf(60.0, ph - 422.0 - 150.0))
+	surv_scroll.position = Vector2(m, 372)
+	surv_scroll.size = Vector2(iw, maxf(60.0, ph - 372.0 - 150.0))
 	surv_flow.custom_minimum_size = Vector2(iw - 4.0, 0)
-	var by: float = ph - 196.0
-	btn_reef.position = Vector2(m, by)
-	btn_reef.size = Vector2(iw, 58)
-	btn_reef.font_size = 22
-	btn_new.position = Vector2(m, by + 66.0)
-	btn_new.size = Vector2(iw, 58)
-	btn_new.font_size = 22
-	btn_home.position = Vector2(m, by + 132.0)
-	btn_home.size = Vector2(iw, 44)
+	var by: float = ph - 142.0
+	var half: float = (iw - 8.0) * 0.5
+	btn_new.position = Vector2(m, by)
+	btn_new.size = Vector2(iw, 62)
+	btn_new.font_size = 26
+	btn_reef.position = Vector2(m, by + 70.0)
+	btn_reef.size = Vector2(half, 52)
+	btn_reef.font_size = 20
+	btn_home.position = Vector2(m + half + 8.0, by + 70.0)
+	btn_home.size = Vector2(half, 52)
 	btn_home.font_size = 18
 
 func _notification(what: int) -> void:
@@ -133,10 +144,22 @@ func refresh() -> void:
 	var why: String = "The next wave had nowhere to land"
 	if not run.flood_info.is_empty():
 		why = "Only %d free cell%s, but the wave needs %d" % [int(run.flood_info.get("free", 0)), "" if int(run.flood_info.get("free", 0)) == 1 else "s", int(run.flood_info.get("need", 3))]
-	stats_label.text = "%s.\n\nTurns played: %d\nMerges: %d   Chains: %d (best +%d)\nCurrents used: %d\nCoins earned: %s   Pearls: %s\nReleased to reef: %d\nTime in pool: %s" % [
-		why, run.turn, int(st["merges"]), int(st["chains"]), int(st["best_chain"]), int(st["shifts"]),
-		PoolScreen._fmt(int(st["coins"])), PoolScreen._fmt(int(st["pearls"])), int(st["releases"]), format_time(run.elapsed)]
-	banked_label.text = "Banked: %s coins · %s pearls" % [PoolScreen._fmt(session.profile.coins), PoolScreen._fmt(session.profile.pearls)]
+	stats_label.text = "%s." % why
+	var g: Dictionary = run.goal
+	if g.is_empty():
+		goal_label.visible = false
+	else:
+		goal_label.visible = true
+		if bool(g["done"]):
+			goal_label.text = "Tide Goal complete: %s\n+%d coins +%d pearls (banked)" % [g["label"], int(g["coins"]), int(g["pearls"])]
+			goal_label.add_theme_color_override("font_color", Color("8be0a8"))
+		else:
+			var pr: String = (" (%d of %d)" % [int(g["progress"]), int(g["target"])]) if int(g["target"]) > 1 else ""
+			goal_label.text = "Tide Goal not met: %s%s\nNo penalty. Next run draws a new one." % [g["label"], pr]
+			goal_label.add_theme_color_override("font_color", Pal.TEXT_DIM)
+	band.queue_redraw()
+	banked_label.text = "Earned %s coins · %s pearls   Banked: %s · %s" % [
+		PoolScreen._fmt(int(st["coins"])), PoolScreen._fmt(int(st["pearls"])), PoolScreen.fmt_hud(session.profile.coins), PoolScreen.fmt_hud(session.profile.pearls)]
 	_rebuild_survivors()
 	_refresh_flow()
 
@@ -148,11 +171,11 @@ func _refresh_flow() -> void:
 	var rate: float = ReefEconomy.rate_per_hour(p)
 	var rate_txt: String = ("%.1f" % rate) if rate < 100.0 else ("%.0f" % rate)
 	if fresh > 0:
-		btn_reef.text = "See your %d new resident%s" % [fresh, "" if fresh == 1 else "s"]
+		btn_reef.text = "Visit Reef · %d new" % fresh
 	else:
-		btn_reef.text = "Visit your reef (+%s/h)" % rate_txt
-	btn_reef.filled = fresh > 0
-	btn_new.filled = fresh == 0
+		btn_reef.text = "Visit Reef"
+	btn_reef.filled = false
+	btn_new.filled = true
 	btn_reef.accent = Pal.CORAL
 	btn_new.accent = Pal.CORAL
 
@@ -201,3 +224,42 @@ func _release_all() -> void:
 	if sfx != null:
 		sfx.play("release")
 	refresh()
+
+
+## The three result tiles: best merge (with its creature), releases, chains.
+class ResultsBand extends Control:
+	var screen: SummaryScreen
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+	func _tile(rc: Rect2, title: String) -> void:
+		ItemArt.draw_card_frame(self, rc, ItemArt.STATE_AVAILABLE, {"badge": false})
+		var font: Font = ThemeDB.fallback_font
+		draw_string(font, Vector2(rc.position.x + 4.0, rc.position.y + 17.0), title, HORIZONTAL_ALIGNMENT_CENTER, rc.size.x - 8.0, 14, Pal.SAND_DEEP.darkened(0.5))
+	func _draw() -> void:
+		if screen == null or screen.session == null or screen.session.run == null:
+			return
+		var run: RunState = screen.session.run
+		var st: Dictionary = run.stats
+		var font: Font = ThemeDB.fallback_font
+		var gap: float = 8.0
+		var tw: float = (size.x - 2.0 * gap) / 3.0
+		var t0 := Rect2(0, 0, tw, size.y)
+		var t1 := Rect2(tw + gap, 0, tw, size.y)
+		var t2 := Rect2(2.0 * (tw + gap), 0, tw, size.y)
+		_tile(t0, "Best merge")
+		var code: int = int(st.get("best_merge_code", 0))
+		if code > 0:
+			CreatureArt.draw_creature(self, code, Vector2(t0.get_center().x, t0.position.y + 54.0), 62.0)
+			var nm: String = Book.tier_name(code)
+			var fs: int = 14
+			while fs > 11 and font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > tw - 10.0:
+				fs -= 1
+			draw_string(font, Vector2(t0.position.x + 5.0, t0.end.y - 8.0), nm, HORIZONTAL_ALIGNMENT_CENTER, tw - 10.0, fs, Pal.INK)
+		else:
+			draw_string(font, Vector2(t0.position.x, t0.position.y + 64.0), "none", HORIZONTAL_ALIGNMENT_CENTER, tw, 20, Pal.INK)
+		_tile(t1, "Released")
+		draw_string(font, Vector2(t1.position.x, t1.position.y + 66.0), str(int(st["releases"])), HORIZONTAL_ALIGNMENT_CENTER, tw, 40, Pal.INK)
+		draw_string(font, Vector2(t1.position.x + 4.0, t1.end.y - 10.0), "to your reef", HORIZONTAL_ALIGNMENT_CENTER, tw - 8.0, 14, Pal.SAND_DEEP.darkened(0.5))
+		_tile(t2, "Longest chain")
+		draw_string(font, Vector2(t2.position.x, t2.position.y + 66.0), ("+%d" % int(st["best_chain"])) if int(st["best_chain"]) > 0 else "none", HORIZONTAL_ALIGNMENT_CENTER, tw, 40 if int(st["best_chain"]) > 0 else 24, Pal.INK)
+		draw_string(font, Vector2(t2.position.x + 4.0, t2.end.y - 10.0), "%d merges · %d turns" % [int(st["merges"]), run.turn], HORIZONTAL_ALIGNMENT_CENTER, tw - 8.0, 13, Pal.SAND_DEEP.darkened(0.5))

@@ -77,6 +77,10 @@ func start_run(layout: Board = null) -> void:
 		run.board = _starter_board()
 	else:
 		run.board = _random_board()
+	if layout == null and not run.tutorial:
+		run.goal = TideGoals.pick(run.seed_value, run.spawn_table)      # optional; saved with the run
+	if not run.practice:
+		Book.observe_board(profile, run.board)
 	save()
 
 ## Retire the finished run (rewards were paid as they happened).
@@ -412,6 +416,11 @@ func try_release(cell: int) -> Dictionary:
 	profile.unseen_residents.append(rid)
 	run.stats["releases"] += 1
 	res["events"].append({"t": "release", "cell": cell, "code": code, "resident_id": rid})
+	if not run.practice:
+		Book.note_released(profile, code)
+		var tg_r: Dictionary = TideGoals.observe_release(profile, run, code)
+		if not tg_r.is_empty():
+			res["tide_goal_done"] = tg_r
 	if run.tutorial:
 		Tutorial.observe(run, res)
 		profile.tutorial["milestone"] = true
@@ -425,6 +434,7 @@ func try_release(cell: int) -> Dictionary:
 		var ray_code: int = Creature.make(Creature.RAY, GameConfig.VISITOR_RESIDENT_TIER)
 		profile.residents.append({"id": ray_id, "code": ray_code, "family": Creature.RAY, "tier": GameConfig.VISITOR_RESIDENT_TIER, "run": run.run_number})
 		profile.unseen_residents.append(ray_id)
+		Book.note_released(profile, ray_code)
 		res["visitor_complete"] = true
 		res["events"].append({"t": "visitor_arrives", "resident_id": ray_id})
 	if not run.practice:
@@ -466,9 +476,16 @@ func land_surge() -> Dictionary:
 	run.pending_surge = []
 	if run.tutorial:
 		run.tut_flags["surge"] = true            # the player has now watched a Surge land
+	if run.mode == "regular" and not run.practice:
+		lr_new_book(res)
 	# Landing never triggers matches (spec): no resolve() here.
 	save()
 	return res
+
+func lr_new_book(res: Dictionary) -> void:
+	var fresh: Array = Book.observe_board(profile, run.board)
+	if not fresh.is_empty():
+		res["book_new"] = fresh
 
 # --- Reef (Update 2) ---------------------------------------------------------------------------
 
@@ -519,16 +536,69 @@ func accept_visitor() -> Dictionary:
 func ensure_daily() -> bool:
 	return DailyGoals.ensure_day(profile, GameClock.now())
 
-## First clear of the Tide Trial pays a small reward once; repeats pay nothing. One write.
-func claim_trial_reward() -> Dictionary:
-	if bool(profile.trial.get("claimed", false)):
+## First clear of a Tide Trial pays a small reward once; repeats pay nothing. One write.
+func claim_trial_reward(trial_id: String = "wrap") -> Dictionary:
+	var d: Dictionary = TideTrial.def_of(trial_id)
+	var st: Dictionary = profile.trials.get(trial_id, {"cleared": false, "claimed": false})
+	if bool(st.get("claimed", false)):
 		return {"coins": 0, "pearls": 0, "first": false}
-	profile.trial["cleared"] = true
-	profile.trial["claimed"] = true
-	profile.coins += GameConfig.TRIAL_REWARD_COINS
-	profile.pearls += GameConfig.TRIAL_REWARD_PEARLS
+	st = {"cleared": true, "claimed": true}
+	profile.trials[trial_id] = st
+	if trial_id == "wrap":
+		profile.trial = st.duplicate()          # the Update 3 flags mirror the first Trial
+	profile.coins += int(d["coins"])
+	profile.pearls += int(d["pearls"])
 	save()
-	return {"coins": GameConfig.TRIAL_REWARD_COINS, "pearls": GameConfig.TRIAL_REWARD_PEARLS, "first": true}
+	return {"coins": int(d["coins"]), "pearls": int(d["pearls"]), "first": true}
+
+func trial_cleared(trial_id: String) -> bool:
+	if trial_id == "wrap" and bool(profile.trial.get("cleared", false)):
+		return true
+	return bool((profile.trials.get(trial_id, {}) as Dictionary).get("cleared", false))
+
+# --- Calm Pool (Update 4) ---------------------------------------------------------------------
+
+## A Calm Pool session. It plays on its own throwaway Profile (so no currency, release, Book,
+## goal, daily or visitor progress can leak out), and its board is stored in THIS profile's
+## `calm.run`, so it resumes after a relaunch while the regular run stays suspended untouched.
+## `fresh` discards the saved Calm board and starts a new one.
+func calm_session(fresh: bool = false) -> GameSession:
+	var s := GameSession.new()
+	s.autosave = false
+	s.profile = Profile.new()
+	s.profile.settings = profile.settings
+	s.base_seed = base_seed
+	var owner: GameSession = self
+	s.save_hook = func() -> void: owner._save_calm(s)
+	var d: Dictionary = profile.calm.get("run", {})
+	if fresh or d.is_empty():
+		profile.calm["plays"] = int(profile.calm.get("plays", 0)) + 1
+		s.start_calm(int(profile.calm["plays"]))
+	else:
+		s.run = RunState.from_dict(d)
+	return s
+
+func _save_calm(s: GameSession) -> void:
+	profile.calm["run"] = s.run.to_dict() if s.run != null else {}
+	save()
+
+func has_calm_board() -> bool:
+	return not (profile.calm.get("run", {}) as Dictionary).is_empty()
+
+## Start (or restart) a Calm board on this session: a Surge every fifth turn, roomier start.
+func start_calm(play_no: int = 1) -> void:
+	run = RunState.new()
+	run.mode = "calm"
+	run.run_number = play_no
+	run.seed_value = (base_seed + play_no * 104729) & 0xFFFFFFFF
+	run.rng = SeededRng.new(run.seed_value)
+	run.currents = GameConfig.START_CURRENTS
+	run.cadence = GameConfig.CALM_CADENCE
+	run.surge_size = GameConfig.SURGE_SIZE
+	run.tide = Tide.MIDDAY
+	run.spawn_table = Tide.spawn_table(Tide.MIDDAY)
+	run.board = _random_board(GameConfig.CALM_START_CREATURES)
+	save()
 
 # --- Internals -------------------------------------------------------------------
 
@@ -553,6 +623,8 @@ func _pay(res: Dictionary, ev: Dictionary) -> void:
 	run.stats["pearls"] += pearls
 	res["coins"] += coins
 	res["pearls"] += pearls
+	if int(ev["tier"]) > int(run.stats.get("best_merge_tier", 0)):
+		run.stats["best_merge_code"] = int(ev["code"])
 	run.stats["best_merge_tier"] = maxi(int(run.stats.get("best_merge_tier", 0)), int(ev["tier"]))
 	res["chain"] = maxi(int(res["chain"]), int(ev["step"]))
 
@@ -600,6 +672,22 @@ func _record_progress(res: Dictionary) -> void:
 		res["goals_done"].append_array(DailyGoals.record(profile, "merges", merges))
 	if used_current:
 		res["goals_done"].append_array(DailyGoals.record(profile, "current", 1))
+	# Tidepool Book: tiers made by this action, then everything now on the board
+	var fresh: Array = []
+	for ev in res["events"]:
+		var t2: String = String(ev["t"])
+		if t2 == "pair" or t2 == "merge":
+			if Book.note_made(profile, int(ev["code"])) and not fresh.has(int(ev["code"])):
+				fresh.append(int(ev["code"]))
+	for c in Book.observe_board(profile, run.board):
+		if not fresh.has(c):
+			fresh.append(c)
+	if not fresh.is_empty():
+		res["book_new"] = fresh
+	# this run's Tide Goal watches the same committed events (and is labelled separately from the daily goals)
+	var tg: Dictionary = TideGoals.observe(profile, run, res)
+	if not tg.is_empty():
+		res["tide_goal_done"] = tg
 
 func _finish_turn(res: Dictionary) -> void:
 	run.turn += 1

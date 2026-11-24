@@ -114,6 +114,55 @@ class SurgeStrip extends Control:
 			draw_string(font, Vector2(tx, 43), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Pal.TEXT if turns_left > 1 else col)
 			draw_string(font, Vector2(size.x - 190.0, size.y * 0.5 + 6.0), "%d creatures drop on empty cells" % GameConfig.SURGE_SIZE, HORIZONTAL_ALIGNMENT_RIGHT, 180.0, 14, Pal.TEXT_DIM)
 
+## One optional Tide Goal for the standard run, shown as a slim strip above the board.
+class GoalStrip extends Control:
+	var text: String = ""
+	var progress: String = ""      # "3/12" or ""
+	var done: bool = false
+	var reward: String = ""        # "+80 coins +2 pearls"
+	var flash: float = 0.0
+	var _sb: StyleBoxFlat = StyleBoxFlat.new()
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_sb.set_corner_radius_all(12)
+		_sb.anti_aliasing = true
+	func celebrate() -> void:
+		flash = 1.0
+		var tw: Tween = create_tween()
+		tw.tween_property(self, "flash", 0.0, 1.2)
+		tw.parallel().tween_method(func(_v: float) -> void: queue_redraw(), 0.0, 1.0, 1.2)
+	func _draw() -> void:
+		var col: Color = Pal.GOLD
+		_sb.bg_color = Pal.PANEL_DARK.lerp(col, 0.10 + 0.35 * flash + (0.10 if done else 0.0))
+		_sb.border_color = col if done else col.darkened(0.3)
+		_sb.set_border_width_all(2)
+		draw_style_box(_sb, Rect2(Vector2.ZERO, size))
+		var font: Font = ThemeDB.fallback_font
+		var cy: float = size.y * 0.5
+		# bullseye / tick: a shape cue, not just colour
+		var ic := Vector2(17.0, cy)
+		if done:
+			draw_circle(ic, 9.0, Color("3fae6a"))
+			draw_polyline(PackedVector2Array([ic + Vector2(-4.5, 0.5), ic + Vector2(-1.2, 3.8), ic + Vector2(5.0, -3.5)]), Color.WHITE, 2.4, true)
+		else:
+			draw_arc(ic, 9.0, 0.0, TAU, 20, col, 2.0, true)
+			draw_arc(ic, 4.5, 0.0, TAU, 14, col, 2.0, true)
+		var right: String = ("Done  " + reward) if done else progress
+		var rw: float = font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x if right != "" else 0.0
+		var tx: float = 34.0
+		var fs: int = 16
+		var avail: float = size.x - tx - rw - 20.0
+		while fs > 12 and font.get_string_size("Tide Goal: " + text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > avail:
+			fs -= 1
+		draw_string(font, Vector2(tx, cy + fs * 0.36), "Tide Goal: " + text, HORIZONTAL_ALIGNMENT_LEFT, avail, fs, Pal.TEXT)
+		if right != "":
+			draw_string(font, Vector2(size.x - rw - 12.0, cy + 5.5), right, HORIZONTAL_ALIGNMENT_LEFT, rw + 2.0, 15, col if not done else Color("8be0a8"))
+	func fits() -> bool:
+		var font: Font = ThemeDB.fallback_font
+		var right: String = ("Done  " + reward) if done else progress
+		var rw: float = font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x if right != "" else 0.0
+		return font.get_string_size("Tide Goal: " + text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x <= size.x - 34.0 - rw - 20.0
+
 class Toast extends PanelContainer:
 	var label: Label
 	var icon_box: Control

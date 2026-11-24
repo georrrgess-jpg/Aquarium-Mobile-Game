@@ -51,6 +51,7 @@ static func default_stats() -> Dictionary:
 		"shifts": 0,
 		"tides": 0,
 		"best_merge_tier": 0,    # highest tier a merge produced this run
+		"best_merge_code": 0,    # ...and what it was (family*10+tier), for the results screen
 		"best_chain_merges": 0,  # most merges in one chain (including the first)
 		"lines": 0,              # three-in-a-row merges
 	}

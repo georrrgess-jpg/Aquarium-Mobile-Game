@@ -114,6 +114,18 @@ const DAILY_GOALS: Array = [
 	{"id": "release", "label": "Release a tier 4+ creature", "target": 1, "coins": 100, "pearls": 2},
 ]
 
+## Tide Goals (Update 4): one optional goal per standard run, drawn from this pool when the run
+## begins and saved with it. Completing it pays once; missing it costs nothing.
+const TIDE_GOAL_COINS: int = 80
+const TIDE_GOAL_PEARLS: int = 2
+const TIDE_GOALS: Array = [
+	{"id": "chain", "label": "Set off a chain reaction", "short": "Chain reaction", "target": 1},
+	{"id": "tier4", "label": "Make a tier 4 creature", "short": "Make a tier 4", "target": 1},
+	{"id": "release_family", "label": "Release a tier 4+ %s", "short": "Release a %s", "target": 1},
+	{"id": "merges", "label": "Make 12 merges", "short": "12 merges", "target": 12},
+	{"id": "current_merge", "label": "Make a merge with a Current", "short": "Merge with a Current", "target": 1},
+]
+
 # --- Guided start, Calm Pool (Update 4) -----------------------------------------------------
 const CALM_CADENCE: int = 5            # Calm Pool: a Surge every fifth turn
 const CALM_START_CREATURES: int = 9    # a roomier start than a standard run

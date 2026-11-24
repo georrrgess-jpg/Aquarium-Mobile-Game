@@ -6,7 +6,8 @@ extends Control
 ## decoration shop (Update 3 adds goals and the Tide Trial); nothing covers the aquarium.
 
 signal play_pressed
-signal trial_pressed
+signal trial_pressed(id: String)
+signal calm_pressed
 signal help_replay
 
 const PAD: float = 10.0
@@ -44,8 +45,8 @@ var tide_badge: TideBadge
 var visitor_banner: VisitorBanner
 var btn_accept: PillButton
 var goals_list: GoalsList
-var trial_card: TrialCard
-var btn_trial: PillButton
+var modes_list: ModesList
+var book_view: Control
 var _phase: int = -1
 var _visitor_shown: bool = false
 ## extra tabs (Update 3 adds Goals / Trial through register_tab)
@@ -131,17 +132,23 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	goals_list = GoalsList.new()
 	goals_list.hub = self
 	panel.add_child(goals_list)
-	trial_card = TrialCard.new()
-	trial_card.hub = self
-	panel.add_child(trial_card)
-	btn_trial = _btn("Start the Tide Trial", "wave", Pal.CORAL, panel)
-	btn_trial.filled = true
-	btn_trial.pressed.connect(func() -> void: trial_pressed.emit())
+	modes_list = ModesList.new()
+	modes_list.hub = self
+	panel.add_child(modes_list)
+	modes_list.row_tapped.connect(func(id: String) -> void:
+		if id == "calm":
+			calm_pressed.emit()
+		else:
+			trial_pressed.emit(id))
+	book_view = (load("res://ui/book_view.gd") as GDScript).new()
+	panel.add_child(book_view)
+	book_view.call("setup", session)
 	_tabs = [
 		{"id": "residents", "label": "Residents", "controls": [roster_scroll]},
 		{"id": "decor", "label": "Decor", "controls": [decor_list, decor_summary, btn_buy, btn_cancel_buy]},
 		{"id": "goals", "label": "Goals", "controls": [goals_list]},
-		{"id": "trial", "label": "Trial", "controls": [trial_card, btn_trial]},
+		{"id": "trial", "label": "Modes", "controls": [modes_list]},
+		{"id": "book", "label": "Book", "controls": [book_view]},
 	]
 	btn_play = _btn("Play", "wave", Pal.CORAL)
 	btn_play.filled = true
@@ -323,10 +330,10 @@ func _layout() -> void:
 	btn_cancel_buy.size = Vector2(pw * 0.38 - 6.0, 38)
 	goals_list.position = Vector2(8, 6)
 	goals_list.size = Vector2(pw, PANEL_H - 12.0)
-	trial_card.position = Vector2(8, 6)
-	trial_card.size = Vector2(pw, PANEL_H - 66.0)
-	btn_trial.position = Vector2(8, PANEL_H - 56.0)
-	btn_trial.size = Vector2(pw, 48)
+	modes_list.position = Vector2(8, 6)
+	modes_list.size = Vector2(pw, PANEL_H - 12.0)
+	book_view.position = Vector2(8, 6)
+	book_view.size = Vector2(pw, PANEL_H - 12.0)
 	y += PANEL_H + 8.0
 	btn_play.position = Vector2(x0, y)
 	btn_play.size = Vector2(iw, 64)
@@ -367,6 +374,7 @@ func refresh(new_context: String) -> void:
 	_refresh_visitor(true)
 	_refresh_numbers()
 	_refresh_buttons()
+	book_view.call("refresh")
 	_show_tab(_active_tab)
 	roster.set_data(p.residents, p.unseen_residents.duplicate(), roster_scroll.size.x if roster_scroll.size.x > 0 else 480.0)
 	roster_scroll.scroll_vertical = 0
@@ -420,8 +428,7 @@ func _refresh_numbers() -> void:
 	income.beauty = ReefEconomy.total_beauty(p)
 	income.queue_redraw()
 	goals_list.queue_redraw()
-	trial_card.queue_redraw()
-	btn_trial.text = "Start the Tide Trial" if not bool(p.trial.get("cleared", false)) else "Play the Tide Trial again"
+	modes_list.queue_redraw()
 	chest_banner.amount = ReefEconomy.chest_amount(p)
 	chest_banner.full = ReefEconomy.chest_full(p)
 	chest_banner.secs = p.chest_secs
@@ -780,48 +787,101 @@ class GoalsList extends Control:
 			return
 		var p: Profile = hub.session.profile
 		var font: Font = ThemeDB.fallback_font
-		draw_string(font, Vector2(4, 18), "Today's goals · they reset at local midnight", HORIZONTAL_ALIGNMENT_LEFT, size.x, 16, Pal.TEXT_DIM)
-		var row_h: float = 62.0
+		draw_string(font, Vector2(4, 18), "Daily goals · reset at local midnight", HORIZONTAL_ALIGNMENT_LEFT, size.x, 16, Pal.TEXT_DIM)
+		var row_h: float = 52.0
 		for i in GameConfig.DAILY_GOALS.size():
 			var g: Dictionary = GameConfig.DAILY_GOALS[i]
 			var id: String = String(g["id"])
 			var done: bool = DailyGoals.is_done(p, id)
 			var prog: int = DailyGoals.progress(p, id)
-			var rc := Rect2(0, 30.0 + float(i) * (row_h + 6.0), size.x, row_h)
+			var rc := Rect2(0, 26.0 + float(i) * (row_h + 4.0), size.x, row_h)
 			_sb.bg_color = Pal.SAND if not done else Pal.SAND.darkened(0.15)
 			_sb.border_color = Pal.GOLD if done else Pal.SAND_DARK
 			_sb.set_border_width_all(3 if done else 2)
 			draw_style_box(_sb, rc)
 			PillButton.draw_icon(self, "check" if done else "goal", rc.position + Vector2(26, row_h * 0.5), 26.0, Pal.TEAL.darkened(0.3) if done else Pal.CORAL_DARK)
-			draw_string(font, rc.position + Vector2(52, 24), String(g["label"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.58, 18, Pal.INK)
+			draw_string(font, rc.position + Vector2(52, 21), String(g["label"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.58, 17, Pal.INK)
 			var rw: String = "+%d coins" % int(g["coins"]) + (" +%d pearl%s" % [int(g["pearls"]), "" if int(g["pearls"]) == 1 else "s"] if int(g["pearls"]) > 0 else "")
-			draw_string(font, rc.position + Vector2(52, 46), "Done · " + rw if done else "Reward: " + rw, HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.62, 14, Pal.SAND_DEEP.darkened(0.5))
+			draw_string(font, rc.position + Vector2(52, 41), "Done · " + rw if done else "Reward: " + rw, HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.62, 14, Pal.SAND_DEEP.darkened(0.5))
 			# progress bar + count (a shape, not only a colour)
-			var bar := Rect2(rc.position.x + size.x * 0.66, rc.position.y + 22.0, size.x * 0.30, 14.0)
+			var bar := Rect2(rc.position.x + size.x * 0.66, rc.position.y + 12.0, size.x * 0.30, 13.0)
 			draw_rect(bar, Pal.INK)
 			var frac: float = clampf(float(prog) / float(g["target"]), 0.0, 1.0)
 			draw_rect(Rect2(bar.position, Vector2(bar.size.x * frac, bar.size.y)), Pal.TEAL if not done else Pal.GOLD)
-			draw_string(font, Vector2(bar.position.x, bar.end.y + 16.0), "%d / %d" % [prog, int(g["target"])], HORIZONTAL_ALIGNMENT_CENTER, bar.size.x, 14, Pal.INK)
+			draw_string(font, Vector2(bar.position.x, bar.end.y + 14.0), "%d / %d" % [prog, int(g["target"])], HORIZONTAL_ALIGNMENT_CENTER, bar.size.x, 13, Pal.INK)
+		# this run's Tide Goal: separate from the daily goals, labelled as such
+		var ry: float = 26.0 + float(GameConfig.DAILY_GOALS.size()) * (row_h + 4.0) + 4.0
+		var run: RunState = hub.session.run
+		var trc := Rect2(0, ry, size.x, row_h)
+		ItemArt.draw_card_frame(self, trc, ItemArt.STATE_AVAILABLE, {"badge": false})
+		if run != null and not run.goal.is_empty() and not run.tutorial:
+			var tg: Dictionary = run.goal
+			var tdone: bool = bool(tg["done"])
+			PillButton.draw_icon(self, "check" if tdone else "goal", trc.position + Vector2(26, row_h * 0.5), 26.0, Pal.TEAL.darkened(0.3) if tdone else Pal.CORAL_DARK)
+			draw_string(font, trc.position + Vector2(52, 21), "Tide Goal (this run)", HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.6, 14, Pal.SAND_DEEP.darkened(0.5))
+			draw_string(font, trc.position + Vector2(52, 41), String(tg["label"]), HORIZONTAL_ALIGNMENT_LEFT, size.x - 52.0 - 80.0, 16, Pal.INK)
+			var ptxt: String = "Done" if tdone else (("%d/%d" % [int(tg["progress"]), int(tg["target"])]) if int(tg["target"]) > 1 else "+%d" % int(tg["coins"]))
+			draw_string(font, Vector2(trc.end.x - 76.0, trc.position.y + 31.0), ptxt, HORIZONTAL_ALIGNMENT_RIGHT, 66.0, 16, Color("2d7a4d") if tdone else Pal.INK)
+		else:
+			draw_string(font, trc.position + Vector2(14, 21), "Tide Goal (this run)", HORIZONTAL_ALIGNMENT_LEFT, size.x - 28.0, 14, Pal.SAND_DEEP.darkened(0.5))
+			draw_string(font, trc.position + Vector2(14, 41), "Start a pool to get one optional goal.", HORIZONTAL_ALIGNMENT_LEFT, size.x - 28.0, 16, Pal.INK)
 
-class TrialCard extends Control:
+class ModesList extends Control:
+	signal row_tapped(id: String)
 	var hub: Control
+	var _press: Vector2 = Vector2.ZERO
+	const ROW_H: float = 56.0
+	const TOP: float = 24.0
+	const ROWS: Array = [
+		{"id": "wrap", "title": "Wrap Trial", "desc": "Wrap a Current round the edge"},
+		{"id": "chain", "title": "Chain Trial", "desc": "Slide first, then merge to chain"},
+		{"id": "space", "title": "Room Trial", "desc": "Free a cell before the Surge"},
+		{"id": "calm", "title": "Calm Pool", "desc": "Surge every 5 turns, no rewards"},
+	]
 	func _init() -> void:
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mouse_filter = Control.MOUSE_FILTER_STOP
+	func row_rect(i: int) -> Rect2:
+		return Rect2(0, TOP + float(i) * (ROW_H + 4.0), size.x, ROW_H)
+	func row_center_global(id: String) -> Vector2:
+		for i in ROWS.size():
+			if String(ROWS[i]["id"]) == id:
+				return get_global_transform() * row_rect(i).get_center()
+		return Vector2.ZERO
+	func _gui_input(event: InputEvent) -> void:
+		var mb := event as InputEventMouseButton
+		if mb == null or mb.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if mb.pressed:
+			_press = mb.position
+		elif _press.distance_to(mb.position) < 12.0:
+			for i in ROWS.size():
+				if row_rect(i).has_point(mb.position):
+					row_tapped.emit(String(ROWS[i]["id"]))
+					return
 	func _draw() -> void:
 		if hub == null or hub.session == null:
 			return
-		var p: Profile = hub.session.profile
+		var se: GameSession = hub.session
 		var font: Font = ThemeDB.fallback_font
-		var cleared: bool = bool(p.trial.get("cleared", false))
-		draw_string(font, Vector2(4, 24), "Tide Trial · learn the wraparound", HORIZONTAL_ALIGNMENT_LEFT, size.x, 20, Pal.GOLD)
-		var lines: Array = [
-			"A handcrafted board and just %d moves." % GameConfig.TRIAL_BUDGET,
-			"Slide a row with your one Current so the edge piece",
-			"wraps round and completes a three in a row.",
-			"Free retries and a hint that points at the row.",
-			"Your pool is paused and safe while you try.",
-		]
-		for i in lines.size():
-			draw_string(font, Vector2(4, 52.0 + float(i) * 22.0), String(lines[i]), HORIZONTAL_ALIGNMENT_LEFT, size.x, 16, Pal.TEXT)
-		var status: String = "Cleared. Replay any time (no extra reward)." if cleared else "First clear pays %d coins + %d pearls." % [GameConfig.TRIAL_REWARD_COINS, GameConfig.TRIAL_REWARD_PEARLS]
-		draw_string(font, Vector2(4, 52.0 + 5.0 * 22.0 + 6.0), status, HORIZONTAL_ALIGNMENT_LEFT, size.x, 16, Pal.TEAL if cleared else Pal.CORAL)
+		draw_string(font, Vector2(4, 17), "Practice and Trials · your pool stays paused", HORIZONTAL_ALIGNMENT_LEFT, size.x, 15, Pal.TEXT_DIM)
+		for i in ROWS.size():
+			var row: Dictionary = ROWS[i]
+			var id: String = String(row["id"])
+			var rc: Rect2 = row_rect(i)
+			var calm: bool = id == "calm"
+			var cleared: bool = (not calm) and se.trial_cleared(id)
+			ItemArt.draw_card_frame(self, rc, ItemArt.STATE_OWNED if cleared else ItemArt.STATE_AVAILABLE, {"badge": false})
+			PillButton.draw_icon(self, "tide" if calm else "wave", rc.position + Vector2(28, ROW_H * 0.5), 26.0, Pal.TEAL.darkened(0.3) if calm else Pal.CORAL_DARK)
+			var right_w: float = 96.0
+			draw_string(font, rc.position + Vector2(54, 23), String(row["title"]), HORIZONTAL_ALIGNMENT_LEFT, size.x - 54.0 - right_w, 17, Pal.INK)
+			draw_string(font, rc.position + Vector2(54, 43), String(row["desc"]), HORIZONTAL_ALIGNMENT_LEFT, size.x - 54.0 - right_w, 13, Pal.SAND_DEEP.darkened(0.5))
+			var rx: float = rc.end.x - 10.0
+			if calm:
+				var lbl: String = "Resume" if se.has_calm_board() else "Start"
+				draw_string(font, Vector2(rx - right_w, rc.position.y + 33.0), lbl, HORIZONTAL_ALIGNMENT_RIGHT, right_w, 16, Pal.INK)
+			elif cleared:
+				ItemArt.draw_check_seal(self, Vector2(rx - 66.0, rc.position.y + ROW_H * 0.5), 18.0)
+				draw_string(font, Vector2(rx - right_w, rc.position.y + 33.0), "Cleared", HORIZONTAL_ALIGNMENT_RIGHT, right_w, 15, Color("2d7a4d"))
+			else:
+				ItemArt.draw_coin(self, Vector2(rx - 66.0, rc.position.y + ROW_H * 0.5), 18.0)
+				draw_string(font, Vector2(rx - right_w, rc.position.y + 33.0), "+%d" % int(TideTrial.def_of(id)["coins"]), HORIZONTAL_ALIGNMENT_RIGHT, right_w, 16, Pal.INK)

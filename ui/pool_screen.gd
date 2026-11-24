@@ -10,6 +10,7 @@ signal run_flooded
 signal trial_exit
 signal help_replay
 signal open_reef_decor
+signal calm_new_board
 
 const GATE_W: float = 84.0
 const GAP: float = 8.0
@@ -57,6 +58,7 @@ var chip_pearls: HudWidgets.Chip
 var chip_turn: HudWidgets.Chip
 var chip_currents: HudWidgets.Chip
 var surge_strip: HudWidgets.SurgeStrip
+var goal_strip: HudWidgets.GoalStrip
 var btn_home: PillButton
 var btn_reef: PillButton
 var btn_motion: PillButton
@@ -126,6 +128,9 @@ func _build() -> void:
 	chip_currents = _chip("wave", "Currents", Pal.CURRENT)
 	surge_strip = HudWidgets.SurgeStrip.new()
 	add_child(surge_strip)
+	goal_strip = HudWidgets.GoalStrip.new()
+	goal_strip.visible = false
+	add_child(goal_strip)
 	btn_home = _btn("", "home", Pal.TEXT_DIM)
 	btn_reef = _btn("Reef", "reef", Pal.TEAL)
 	btn_motion = _btn("", "motion", Pal.TEXT_DIM)
@@ -330,6 +335,10 @@ func _layout() -> void:
 	surge_strip.position = Vector2(x0, y)
 	surge_strip.size = Vector2(iw, 52)
 	y += 52.0 + 8.0
+	if goal_strip.visible:                  # the optional Tide Goal: a slim strip right above the grid
+		goal_strip.position = Vector2(x0, y - 2.0)
+		goal_strip.size = Vector2(iw, 30)
+		y += 30.0 + 4.0
 	# board
 	var avail_w: float = iw - GATE_W - GAP - BoardView.TAB
 	var below_min: float = 58.0 + 8.0 + 54.0 + 8.0 + 96.0 + 8.0 + 8.0
@@ -380,8 +389,9 @@ func _layout() -> void:
 	gate.visible = not trial_mode
 	reef_peek.visible = not sb_mode
 	chip_pearls.visible = not sb_mode
-	btn_reef.visible = not sb_mode
+	btn_reef.visible = not sb_mode or calm_mode
 	btn_retry.visible = sb_mode
+	btn_retry.text = "New board" if calm_mode else "Retry"
 	if sb_mode:
 		chip_coins.size = Vector2(chip_w * 2.0 + g, chip_h)
 		btn_home.icon = "x"
@@ -436,6 +446,13 @@ func set_trial(t: TideTrial) -> void:
 	session = t.session
 	board_view.session = session
 	board_view.gate = null                    # no Reef Gate in the Trial
+	_layout()
+
+## Calm Pool: the same pool UI on its own resumable board, with no rewards of any kind.
+func set_calm(s: GameSession) -> void:
+	calm_mode = true
+	session = s
+	board_view.session = s
 	_layout()
 
 func set_help(s: GameSession) -> void:
@@ -559,7 +576,7 @@ func _refresh_hud() -> void:
 	if trial_mode:
 		chip_coins.icon = "tide"
 		chip_coins.label = "Moves left"
-		chip_coins.value = "%d / %d" % [trial.moves_left, GameConfig.TRIAL_BUDGET]
+		chip_coins.value = "%d / %d" % [trial.moves_left, trial.budget]
 		chip_turn.label = "Attempt"
 		chip_turn.value = str(trial.attempts)
 		chip_currents.value = "x%d" % session.run.currents
@@ -572,6 +589,7 @@ func _refresh_hud() -> void:
 	var run: RunState = session.run
 	chip_turn.value = str(run.turn)
 	chip_currents.value = "x%d" % run.currents
+	_refresh_goal_strip()
 	if help_mode or calm_mode:
 		chip_coins.icon = "goal" if help_mode else "wave"
 		chip_coins.label = "Guided practice" if help_mode else "Calm Pool"
@@ -580,6 +598,21 @@ func _refresh_hud() -> void:
 	surge_strip.turns_left = run.turns_until_surge()
 	surge_strip.incoming = run.pending_surge
 	surge_strip.refresh()
+
+## The Tide Goal strip: shown only for a standard run that has one (not guided, practice, Calm or Trial).
+func _refresh_goal_strip() -> void:
+	var run: RunState = session.run
+	var want: bool = not is_sandbox() and TideGoals.active(run) and not run.tutorial and not run.practice
+	if want:
+		var g: Dictionary = run.goal
+		goal_strip.text = String(g["short"])
+		goal_strip.done = bool(g["done"])
+		goal_strip.progress = TideGoals.progress_text(run) if not bool(g["done"]) else ""
+		goal_strip.reward = "+%d coins +%d pearls" % [int(g["coins"]), int(g["pearls"])]
+		goal_strip.queue_redraw()
+	if want != goal_strip.visible:
+		goal_strip.visible = want
+		_layout()
 
 ## Compact form for the HUD so very large balances still fit a chip.
 static func fmt_hud(n: int) -> String:
@@ -700,11 +733,11 @@ func _update_prompt() -> void:
 		return
 	if trial_mode and not cur_mode and board_view.selected < 0:
 		if trial.status == TideTrial.WON:
-			text = "Cleared! The wrap made your three in a row."
+			text = "Cleared! " + trial.win_text()
 		elif trial.status == TideTrial.LOST:
-			text = "Out of moves. Retry is free."
+			text = "Not this time. Retry is free."
 		else:
-			text = "Goal: wrap a Current round the edge to make three in a row. %d move%s left." % [trial.moves_left, "" if trial.moves_left == 1 else "s"]
+			text = trial.prompt_text()
 		prompt_label.text = text
 		board_view.hint_line = board_view.hint_line
 		board_view._over.queue_redraw()
@@ -1043,6 +1076,8 @@ func _play_result(res: Dictionary) -> void:
 	_refresh_all()
 	if trial_mode:
 		if trial_done:
+			if not session.run.pending_surge.is_empty():
+				await _run_surge_sequence()          # the wave you made room for lands before the result
 			_show_trial_result()
 			return
 		busy = false
@@ -1077,6 +1112,18 @@ func _announce_progress(res: Dictionary) -> void:
 	for g in res.get("goals_done", []):
 		var rw: String = "+%d coins" % int(g["coins"]) + (" +%d pearl%s" % [int(g["pearls"]), "" if int(g["pearls"]) == 1 else "s"] if int(g["pearls"]) > 0 else "")
 		lines.append("Goal complete: %s  %s" % [g["label"], rw])
+	var tg: Dictionary = res.get("tide_goal_done", {})
+	if not tg.is_empty():
+		lines.append("Tide Goal complete: %s  +%d coins +%d pearls" % [tg["short"], int(tg["coins"]), int(tg["pearls"])])
+		goal_strip.celebrate()
+	var fresh: Array = res.get("book_new", [])
+	if not fresh.is_empty() and not session.run.tutorial:
+		var names: PackedStringArray = PackedStringArray()
+		for c in fresh:
+			names.append(Book.tier_name(int(c)))
+		lines.append("New in your Tidepool Book: " + ", ".join(names))
+	if bool(res.get("calm_reset", false)):
+		lines.append("The pool filled up, so Calm Pool made a fresh board. No harm done.")
 	if bool(res.get("visitor_created", false)):
 		lines.append("Lantern Ray: now release it through the Reef Gate!")
 	if bool(res.get("visitor_complete", false)):
@@ -1233,7 +1280,7 @@ func _on_confirm() -> void:
 # --- Rewards FX ------------------------------------------------------------------------------
 
 func _on_reward(global_pos: Vector2, coins: int, pearls: int, _step: int, _tier: int) -> void:
-	if help_mode or calm_mode:
+	if help_mode or calm_mode or trial_mode:
 		return                       # practice boards show no balances, so there is nothing to fly to
 	if reduced_motion:
 		_pearl_arrived(coins, pearls)
@@ -1296,11 +1343,16 @@ func _on_chain_cue(step: int, _pos: Vector2) -> void:
 func _on_trial_hint() -> void:
 	if busy or not trial_mode or trial.status != TideTrial.PLAYING:
 		return
-	var h: Dictionary = trial.hint()
-	board_view.hint_line = {"axis": int(h["axis"]), "index": int(h["index"])}
+	board_view.guide = {}
+	board_view.hint_line = {}
+	if trial.id == "wrap":
+		var h: Dictionary = trial.hint()
+		board_view.hint_line = {"axis": int(h["axis"]), "index": int(h["index"])}
+	else:
+		board_view.guide = trial.hint_guide()
 	board_view._under.queue_redraw()
 	board_view._over.queue_redraw()
-	toast.show_text("Hint: slide row %d to the LEFT. The edge piece wraps round to the far end." % (int(h["index"]) + 1), 3.2)
+	toast.show_text(trial.hint_text(), 3.2)
 	if sfx != null:
 		sfx.play("select")
 
@@ -1311,6 +1363,10 @@ func _on_trial_retry() -> void:
 		_enter_trial()
 		toast.hide_now()
 		return
+	if calm_mode:
+		if not busy:
+			calm_new_board.emit()
+		return
 	if not trial_mode or (busy and not results_panel.visible):
 		return
 	trial.new_attempt()
@@ -1320,10 +1376,10 @@ func _on_trial_retry() -> void:
 func _show_trial_result() -> void:
 	board_view.interactive = false
 	var won: bool = trial.status == TideTrial.WON
-	results_title.text = "Cleared!" if won else "Out of moves"
+	results_title.text = "Cleared!" if won else ("The pool floods" if trial.session.run.status == RunState.FLOODED else "Out of moves")
 	var body: String = ""
 	if won:
-		body = "A wrapped Current made your three in a row."
+		body = trial.win_text()
 		if claim_reward.is_valid():
 			var r: Dictionary = claim_reward.call()
 			if bool(r.get("first", false)):
@@ -1332,7 +1388,7 @@ func _show_trial_result() -> void:
 				body += "\n(The first-clear reward is already yours.)"
 		btn_res_retry.text = "Play again"
 	else:
-		body = "Hint: shift row 3 left, so the edge piece wraps round. Retries are free."
+		body = trial.lose_text()
 		btn_res_retry.text = "Try again"
 	btn_res_retry.icon = "retry"
 	results_body.text = body

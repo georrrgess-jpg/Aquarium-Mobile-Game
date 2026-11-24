@@ -915,7 +915,7 @@ func scenario_hub_layout() -> void:
 	for ctx in ["start", "hub_pool"]:
 		main.show_screen(ctx)
 		await frames(5)
-		for tab in [0, 1]:
+		for tab in [0, 1, 2, 3, 4]:
 			await click_btn(main.hub.tab_buttons[tab])
 			check_hub_layout("%s tab %d %s" % [ctx, tab, tag])
 			await shot("H_%s_tab%d_%s" % [ctx, tab, tag])
@@ -963,6 +963,15 @@ func check_hub_layout(label: String) -> void:
 		var tb: PillButton = h.tab_buttons[i]
 		if not tb.content_fits():
 			bad.append("tab '%s' does not fit" % tb.text)
+	# the active tab's content stays inside the panel
+	var pr: Rect2 = h.panel.get_global_rect()
+	for t in h._tabs:
+		if String(t["id"]) != h._active_tab:
+			continue
+		for c in t["controls"]:
+			var cc: Control = c
+			if cc.is_visible_in_tree() and not pr.encloses(cc.get_global_rect()):
+				bad.append("tab content %s sticks out of the panel" % cc.get_class())
 	check(bad.is_empty(), "hub layout[%s] %d elements, no overlap, on screen%s" % [label, rects.size(), "" if bad.is_empty() else " -> " + "; ".join(bad)])
 
 # --- Update 2 checkpoint -----------------------------------------------------------------------------
@@ -991,11 +1000,14 @@ func scenario_u2_checkpoint_a() -> void:
 	check(se.run.board.code_at(i_(1, 4)) == Creature.make(2, 3) and se.run.turn == 2, "wrapped Current committed (tier-3 Starfish)")
 	await tap_cells(i_(1, 4), i_(2, 4))                                    # F3 + F3 -> F4, turn 3 -> Surge
 	await get_tree().create_timer(0.6).timeout
-	check(se.run.pending_surge.size() == 3, "Surge triggered on turn 3")
+	check(se.run.turn == 3 and se.run.pending_surge.is_empty() and se.run.board.creature_count() == 9, "the 3rd turn raised the Surge and it landed")
 	await idle()
 	await drag(cell_center(i_(2, 4)), gate_center())                      # release #1
 	await idle()
 	check(se.profile.residents.size() == 1, "first release")
+	if pool().arrival.visible:                       # the first-release card: continue regular play
+		await click(pool().arrival.btn_keep.get_global_rect().get_center())
+		await idle()
 	await tap_cells(i_(4, 2), i_(6, 4))                                    # S3 + S3 -> S4
 	check(se.run.board.code_at(i_(6, 4)) == Creature.make(1, 4), "tier 4 Shrimp made by pair merge")
 	await click(cell_center(i_(6, 4)))
@@ -1258,7 +1270,7 @@ func scenario_u3_trial() -> void:
 	check(main.current == "start" and main.hub.btn_play.text == "Resume run", "hub offers Resume run for the suspended pool")
 	await click_btn(main.hub.tab_buttons[3])
 	await shot("u3_trial_tab")
-	await click_btn(main.hub.btn_trial)
+	await click(main.hub.modes_list.row_center_global("wrap"))
 	check(main.current == "trial" and main.trial_screen.visible and main.trial_screen.trial_mode, "the Trial opens")
 	var tp: PoolScreen = main.trial_screen
 	var goals_before: String = str(se.profile.daily)
@@ -1303,7 +1315,7 @@ func scenario_u3_trial() -> void:
 	check(main.hub.btn_play.text == "Resume run", "and the regular pool can still be resumed")
 	# replay: no second reward
 	await click_btn(main.hub.tab_buttons[3])
-	await click_btn(main.hub.btn_trial)
+	await click(main.hub.modes_list.row_center_global("wrap"))
 	var coins1: int = se.profile.coins
 	await click_btn(tp.btn_current)
 	await click(tp.board_view.get_global_transform() * Vector2(BoardView.TAB * 0.5, BoardView.TAB + 2.5 * tp.board_view.cs))
@@ -1642,3 +1654,193 @@ func scenario_n_kinds() -> void:
 	seen["nocurrent"] = pool().toast.kind
 	check(seen["invalid"] == "invalid" and seen["capped"] == "capped" and seen["nocurrent"] == "nocurrent", "invalid target, capped tier and spent Current each get their own look (%s)" % str(seen))
 	check(se.run.turn == 0, "none of them spent a turn")
+
+# --- Update 4 pass 3: Tide Goals, Trials, Calm Pool, Book, results ---------------------------------
+
+func _p3_ready() -> GameSession:
+	var se: GameSession = session()
+	se.profile.tutorial = {"done": true, "skipped": true, "milestone": true, "restarts": 0}
+	se.save()
+	return se
+
+func _drag_in(sc: PoolScreen, a: int, b: int) -> void:
+	await drag(sc.board_view.cell_center_global(a), sc.board_view.cell_center_global(b))
+	await idle()
+	var guard: int = 0
+	while sc.busy and not sc.results_panel.visible and guard < 600:
+		await get_tree().process_frame
+		guard += 1
+	await frames(3)
+
+func scenario_p3_goal() -> void:
+	var se: GameSession = _p3_ready()
+	main.hub.refresh("start")
+	await click_btn(main.hub.btn_play)
+	check(main.current == "pool" and not se.run.tutorial and not se.run.goal.is_empty(), "a standard run has one Tide Goal ('%s')" % se.run.goal.get("label", ""))
+	var gs: HudWidgets.GoalStrip = pool().goal_strip
+	check(gs.visible and gs.text == String(se.run.goal["short"]), "the goal strip is shown above the grid: '%s'" % gs.text)
+	check(gs.fits(), "the goal text fits its strip")
+	var gr: Rect2 = gs.get_global_rect()
+	check(not gr.intersects(board().get_global_rect()) and not gr.intersects(pool().surge_strip.get_global_rect()), "the strip overlaps neither the grid nor the Surge strip")
+	await shot("p3_goal_strip")
+	# complete a tier-4 goal for real
+	se.run.goal = {"id": "tier4", "label": "Make a tier 4 creature", "short": "Make a tier 4", "family": 0, "target": 1, "progress": 0, "done": false, "coins": GameConfig.TIDE_GOAL_COINS, "pearls": GameConfig.TIDE_GOAL_PEARLS}
+	load_board(rows_board(["S3 . . . . S3", ". . . . . .", ". . . . F1 F1"]), 0, 2)
+	var coins0: int = se.profile.coins
+	await drag_cells(i_(0, 0), i_(0, 5))
+	check(bool(se.run.goal["done"]) and se.profile.coins >= coins0 + GameConfig.TIDE_GOAL_COINS, "making a tier 4 completes the goal and pays it")
+	check(gs.done, "the strip switches to Done")
+	check(pool().toast.visible and pool().toast.label.text.find("Tide Goal complete") >= 0, "a toast announces it")
+	await shot("p3_goal_done")
+	# another tier 4 pays only the merge
+	var coins1: int = se.profile.coins
+	load_board(rows_board(["S3 . . . . S3"]), 1, 2)
+	await drag_cells(i_(0, 0), i_(0, 5))
+	check(se.profile.coins - coins1 == Rewards.coins_for(4, 0), "the goal never pays twice")
+
+func scenario_p3_modes() -> void:
+	GameClock.set_tz_bias_seconds(0)
+	GameClock.freeze(at(12, 0))
+	var se: GameSession = _p3_ready()
+	main.hub.refresh("start")
+	await click_btn(main.hub.btn_play)
+	await idle()
+	var reg: Dictionary = snapshot()
+	await click_btn(pool().btn_home)
+	await click_btn(main.hub.tab_buttons[3])
+	check(main.hub.modes_list.visible, "the Modes tab lists the Trials and Calm Pool")
+	await shot("p3_modes_tab")
+	# --- chain trial
+	await click(main.hub.modes_list.row_center_global("chain"))
+	var tp: PoolScreen = main.trial_screen
+	check(main.current == "trial" and tp.trial.id == "chain" and tp.chip_coins.value == "2 / 2", "the Chain Trial opens with two moves")
+	check(tp.surge_strip.custom_text != "" and tp.prompt_label.text.length() > 0, "goal shown: '%s'" % tp.surge_strip.custom_text)
+	await shot("p3_chain_start")
+	await click_btn(tp.btn_hint)
+	check(not tp.board_view.guide.is_empty(), "the Hint marks the setup slide")
+	await shot("p3_chain_hint")
+	var g1: Dictionary = tp.trial.hint_guide()
+	await _drag_in(tp, int(g1["from"]), int(g1["to"]))
+	check(tp.trial.moves_left == 1 and tp.trial.status == TideTrial.PLAYING, "after the slide: one move left")
+	var g2: Dictionary = tp.trial.hint_guide()
+	check(String(g2["style"]) == "pair", "the Hint now marks the merge")
+	var coins0: int = se.profile.coins
+	await _drag_in(tp, int(g2["from"]), int(g2["to"]))
+	check(tp.trial.status == TideTrial.WON and tp.results_panel.visible, "the merge sets off a chain: Cleared")
+	check(se.profile.coins == coins0 + int(TideTrial.def_of("chain")["coins"]), "first clear pays %d coins" % int(TideTrial.def_of("chain")["coins"]))
+	await shot("p3_chain_won")
+	await click(tp.btn_res_back.get_global_rect().get_center())
+	check(main.current == "start", "back to the reef")
+	# --- room trial: the Surge lands, then the result
+	await click_btn(main.hub.tab_buttons[3])
+	await click(main.hub.modes_list.row_center_global("space"))
+	check(tp.trial.id == "space" and tp.session.run.board.empty_cells().size() == 2, "the Room Trial starts with only 2 free cells")
+	await shot("p3_space_start")
+	var sg: Dictionary = tp.trial.hint_guide()
+	await _drag_in(tp, int(sg["from"]), int(sg["to"]))
+	check(tp.session.run.board.empty_cells().size() == 3 and tp.trial.moves_left == 1 and tp.trial.status == TideTrial.PLAYING, "merging the pair frees a third cell; one move before the Surge")
+	var slid: bool = false
+	for i in tp.session.run.board.cells.size():
+		if tp.session.run.board.code_at(i) == 0 or slid:
+			continue
+		var tg0: Dictionary = tp.session.valid_targets(i)
+		if (tg0["move"] as PackedInt32Array).size() > 0:
+			await _drag_in(tp, i, int((tg0["move"] as PackedInt32Array)[0]))
+			slid = true
+	var guard: int = 0
+	while not tp.results_panel.visible and guard < 400:
+		await get_tree().process_frame
+		guard += 1
+	check(tp.trial.status == TideTrial.WON and tp.results_panel.visible, "the Surge lands safely and the Trial is cleared")
+	await shot("p3_space_won")
+	await click(tp.btn_res_back.get_global_rect().get_center())
+	# --- calm pool
+	await click_btn(main.hub.tab_buttons[3])
+	await click(main.hub.modes_list.row_center_global("calm"))
+	var cp: PoolScreen = main.calm_screen
+	check(main.current == "calm" and cp.visible and cp.calm_mode, "Calm Pool opens")
+	check(cp.chip_coins.label == "Calm Pool" and cp.chip_coins.value == "No rewards" and not cp.goal_strip.visible, "it says plainly that nothing is earned and shows no goal")
+	check(cp.surge_strip.cadence == 5, "a Surge every 5 turns")
+	await shot("p3_calm_start")
+	var cb: Board = cp.session.run.board
+	var moved: bool = false
+	for i in cb.cells.size():
+		if cb.code_at(i) == 0 or moved:
+			continue
+		var tg: Dictionary = cp.session.valid_targets(i)
+		if (tg["move"] as PackedInt32Array).size() > 0:
+			await _drag_in(cp, i, int((tg["move"] as PackedInt32Array)[0]))
+			moved = true
+	var cturn: int = cp.session.run.turn
+	check(cturn == 1, "a Calm move was played")
+	var calm_cells: PackedInt32Array = cp.session.run.board.cells.duplicate()
+	await click_btn(cp.btn_home)
+	check(main.current == "start" and main.hub.btn_play.text == "Resume run", "quick exit to the reef; the regular run is still there to resume")
+	check(str(se.run.board.to_array()) == str(reg["board"]), "the regular board is untouched")
+	await click_btn(main.hub.tab_buttons[3])
+	await click(main.hub.modes_list.row_center_global("calm"))
+	check(cp.session.run.turn == cturn and cp.session.run.board.cells == calm_cells, "Calm Pool resumes the same board")
+	await click_btn(cp.btn_retry)
+	check(cp.session.run.turn == 0 and cp.session.run.board.cells != calm_cells, "'New board' starts another")
+	await shot("p3_calm_new")
+	await click_btn(cp.btn_home)
+	await click_btn(main.hub.btn_play)
+	check(main.current == "pool" and str(se.run.board.to_array()) == str(reg["board"]), "Resume run returns to the regular pool exactly as it was")
+	GameClock.reset()
+
+func scenario_p3_book() -> void:
+	var se: GameSession = _p3_ready()
+	for code in [11, 12, 13, 21, 22]:
+		Book.note_made(se.profile, code)
+	Book.note_released(se.profile, 14)
+	Book.note_released(se.profile, 22)
+	se.profile.residents = [{"id": 1, "code": 14, "family": 1, "tier": 4, "run": 1}, {"id": 2, "code": 22, "family": 2, "tier": 2, "run": 1}]
+	main.hub.refresh("start")
+	await click_btn(main.hub.tab_buttons[4])
+	var bv: Control = main.hub.book_view
+	check(bv.visible and bv.size.x > 200.0, "the Book tab shows the page")
+	var vr: Rect2 = bv.get_global_rect()
+	var pr: Rect2 = main.hub.panel.get_global_rect()
+	check(pr.encloses(vr), "the Book fits inside the hub panel")
+	await shot("p3_book")
+	var rects: Dictionary = bv.call("tile_rects")
+	var small: int = 0
+	for k in rects:
+		var r: Rect2 = rects[k]
+		if r.size.x < 43.5 or r.size.y < 43.5:
+			small += 1
+	check(small == 0, "every Book tile is finger-sized (>=44 px), %d tiles visible" % rects.size())
+
+func scenario_p3_results() -> void:
+	var se: GameSession = _p3_ready()
+	main.hub.refresh("start")
+	await click_btn(main.hub.btn_play)
+	se.run.goal = {"id": "merges", "label": "Make 12 merges", "short": "12 merges", "family": 0, "target": 12, "progress": 5, "done": false, "coins": 80, "pearls": 2}
+	var rows: Array = []
+	for r in GameConfig.ROWS:
+		var toks: PackedStringArray = PackedStringArray()
+		for c in GameConfig.COLS:
+			toks.append("S1" if (r + c) % 2 == 0 else "F2")
+		rows.append(" ".join(toks))
+	var fb: Board = rows_board(rows)
+	fb.set_code(i_(6, 4), 0)
+	fb.set_code(i_(6, 5), 0)
+	fb.set_code(i_(0, 0), Creature.make(1, 5))
+	se.run.stats["best_merge_code"] = Creature.make(Creature.STAR, 5)
+	se.run.stats["best_merge_tier"] = 5
+	se.run.stats["best_chain"] = 2
+	se.run.stats["releases"] = 3
+	load_board(fb, 2, 2)
+	await drag(cell_center(i_(6, 3)), cell_center(i_(6, 4)))
+	await idle_until_summary()
+	check(main.current == "summary", "the flood ends at the results screen")
+	var sc: SummaryScreen = main.summary_screen
+	check(sc.btn_new.text == "Play Again" and sc.btn_reef.text.begins_with("Visit Reef"), "Play Again and Visit Reef are the two clear actions")
+	check(sc.goal_label.visible and sc.goal_label.text.find("not met") >= 0, "an unmet goal is reported without penalty")
+	await shot("p3_results_goal_missed")
+	se.run.goal["done"] = true
+	sc.refresh()
+	check(sc.goal_label.text.find("complete") >= 0, "a completed goal is shown")
+	await shot("p3_results_goal_done")
+	await click_btn(sc.btn_new)
+	check(main.current == "pool" and se.run.turn == 0 and not se.run.goal.is_empty() and not bool(se.run.goal["done"]), "Play Again starts a fresh run with a new goal")

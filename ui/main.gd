@@ -12,6 +12,8 @@ var hub: ReefHub
 var pool_screen: PoolScreen
 var trial_screen: PoolScreen
 var help_screen: PoolScreen
+var calm_screen: PoolScreen
+var _trial_id: String = "wrap"
 var backdrop: Backdrop
 var safe_top: float = 0.0
 var safe_bottom: float = 0.0
@@ -45,7 +47,8 @@ func _ready() -> void:
 	summary_screen = SummaryScreen.new()
 	trial_screen = PoolScreen.new()
 	help_screen = PoolScreen.new()
-	for s in [hub, pool_screen, trial_screen, help_screen, summary_screen]:
+	calm_screen = PoolScreen.new()
+	for s in [hub, pool_screen, trial_screen, help_screen, calm_screen, summary_screen]:
 		var c: Control = s
 		c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		add_child(c)
@@ -66,6 +69,19 @@ func _ready() -> void:
 	help_screen.anim_speed = float(args.get("speed", 1.0))
 	help_screen.open_home.connect(func() -> void: _open_hub("start"))
 	help_screen.trial_exit.connect(func() -> void: _open_hub("start"))
+	# Calm Pool: its own board and session (stored in the real profile), no rewards, quick exit
+	calm_screen.setup(session, sfx)
+	calm_screen.anim_speed = float(args.get("speed", 1.0))
+	calm_screen.open_home.connect(func() -> void: _open_hub("start"))
+	calm_screen.open_reef.connect(func() -> void: _open_hub("start"))
+	calm_screen.trial_exit.connect(func() -> void: _open_hub("start"))
+	calm_screen.help_replay.connect(func() -> void: show_screen("help"))
+	calm_screen.calm_new_board.connect(func() -> void:
+		calm_screen.set_calm(session.calm_session(true))
+		calm_screen.enter())
+	hub.calm_pressed.connect(func() -> void:
+		hub.leave()
+		show_screen("calm"))
 	pool_screen.help_replay.connect(func() -> void: show_screen("help"))
 	hub.help_replay.connect(func() -> void: show_screen("help"))
 	pool_screen.open_reef_decor.connect(func() -> void:
@@ -126,7 +142,7 @@ func _apply_safe_area() -> void:
 			bottom = maxf(0.0, float(scr.y - area.end.y)) * k
 	safe_top = top
 	safe_bottom = bottom
-	for sc in [hub, pool_screen, trial_screen, help_screen, summary_screen]:
+	for sc in [hub, pool_screen, trial_screen, help_screen, calm_screen, summary_screen]:
 		var c: Control = sc
 		c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		c.offset_top = top
@@ -144,14 +160,17 @@ func _parse_args() -> Dictionary:
 func _sync_backdrop() -> void:
 	if backdrop == null:
 		return
-	var pool_like: bool = pool_screen.visible or trial_screen.visible or help_screen.visible
+	var pool_like: bool = pool_screen.visible or trial_screen.visible or help_screen.visible or calm_screen.visible
 	backdrop.animate_enabled = pool_like
 	var want_vis: bool = pool_like or summary_screen.visible
 	if backdrop.visible != want_vis:
 		backdrop.visible = want_vis
 	if not backdrop.visible:
 		return
-	var sc: PoolScreen = pool_screen if pool_screen.visible else (trial_screen if trial_screen.visible else help_screen)
+	var sc: PoolScreen = pool_screen
+	for cand in [trial_screen, help_screen, calm_screen]:
+		if (cand as PoolScreen).visible:
+			sc = cand
 	if pool_like and sc.board_view != null:
 		var bv: BoardView = sc.board_view
 		var tl: Vector2 = bv.get_global_transform() * Vector2(BoardView.TAB, BoardView.TAB)
@@ -162,7 +181,7 @@ func _sync_backdrop() -> void:
 func show_screen(name: String) -> void:
 	if name == "reef":
 		name = "hub_pool"
-	for sc in [pool_screen, trial_screen, help_screen]:
+	for sc in [pool_screen, trial_screen, help_screen, calm_screen]:
 		if (sc as PoolScreen).visible:
 			(sc as PoolScreen).leave()          # nothing half-finished is carried to the next screen
 	current = name
@@ -171,6 +190,7 @@ func show_screen(name: String) -> void:
 	pool_screen.visible = name == "pool"
 	trial_screen.visible = name == "trial"
 	help_screen.visible = name == "help"
+	calm_screen.visible = name == "calm"
 	summary_screen.visible = name == "summary"
 	match name:
 		"start":
@@ -183,8 +203,12 @@ func show_screen(name: String) -> void:
 			_apply_tide(true)
 			pool_screen.enter()
 		"trial":
-			trial_screen.set_trial(TideTrial.new())      # a fresh attempt; the regular run stays suspended
+			trial_screen.set_trial(TideTrial.new(_trial_id))      # a fresh attempt; the regular run stays suspended
+			trial_screen.claim_reward = Callable(session, "claim_trial_reward").bind(_trial_id)
 			trial_screen.enter()
+		"calm":
+			calm_screen.set_calm(session.calm_session())          # resumes the saved Calm board
+			calm_screen.enter()
 		"help":
 			help_screen.set_help(GameSession.new_tutorial_sandbox())
 			help_screen.enter()
@@ -194,7 +218,8 @@ func show_screen(name: String) -> void:
 func _open_hub(from: String) -> void:
 	show_screen({"start": "start", "pool": "hub_pool", "summary": "hub_summary"}[from])
 
-func _on_hub_trial() -> void:
+func _on_hub_trial(id: String) -> void:
+	_trial_id = id
 	hub.leave()
 	show_screen("trial")
 
@@ -209,7 +234,7 @@ func _apply_tide(force: bool) -> void:
 	var pal: Dictionary = BgArt.palette(ph)
 	var night: float = [0.15, 0.0, 0.45, 1.0][ph]
 	backdrop.palette = pal
-	for sc in [pool_screen, trial_screen, help_screen]:
+	for sc in [pool_screen, trial_screen, help_screen, calm_screen]:
 		var p: PoolScreen = sc
 		p.reef_peek.palette = pal
 		p.reef_peek.night_amount = night

@@ -10,7 +10,7 @@ extends RefCounted
 ##
 ## opts (all optional): alpha, flip, phase (radians; flap / idle), rot (radians),
 ##   badge (bool, draw_creature only), glow (bool, draw_creature only),
-##   detail (0 auto from size, 1 small, 2 full).
+##   detail (0 auto from size, 1 small, 2 full), silhouette (Color; draw_body only: flat one-colour shape).
 ## Auto detail: < 56px small, < 110px medium, otherwise full.
 
 const _INSET := 0.92            # body radius as a fraction of half the cell (margin for outline)
@@ -79,6 +79,9 @@ static func draw_body(ci: CanvasItem, code: int, center: Vector2, size: float, o
 	var u: float = size * 0.5 * _INSET * scale_for_tier(tier)
 	var ub: int = maxi(int(round(u)), 6)     # geometry is built per integer unit size; a <=3% draw scale absorbs the rest
 	var ops: Array = _ops_for(code, flip, phase, ub)
+	if opts.has("silhouette"):
+		_run_flat(ci, ops, center, rot, u / float(ub), lod, Color(opts["silhouette"]))
+		return
 	_run(ci, ops, center, rot, u / float(ub), lod, alpha, phase)
 
 ## Dev helper: bounding box (in units of `size`, centred on 0) of the body drawn at `size`.
@@ -170,6 +173,27 @@ static func _run(ci: CanvasItem, ops: Array, center: Vector2, rot: float, k: flo
 			ci.draw_mesh(CreatureParts.glow_mesh(), null, Transform2D(Vector2(gr, 0.0), Vector2(0.0, gr), gc), _mul(op[4], alpha))
 		elif t == CreatureParts.OP_DYN:
 			_dyn(ci, op, phase, alpha)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+## Silhouette replay: same geometry, every ink replaced by `col` (Book "next" tiles).
+static func _run_flat(ci: CanvasItem, ops: Array, center: Vector2, rot: float, k: float, lod: int, col: Color) -> void:
+	ci.draw_set_transform(center, rot, Vector2(k, k))
+	for op in ops:
+		if int(op[1]) > lod:
+			continue
+		var t: int = int(op[0])
+		if t == CreatureParts.OP_MESH:
+			ci.draw_mesh(op[2], null, Transform2D.IDENTITY, col)
+		elif t == CreatureParts.OP_STROKE:
+			ci.draw_polyline(op[2], _mul(col, (op[3] as Color).a), float(op[4]), true)
+		elif t == CreatureParts.OP_FILL:
+			ci.draw_colored_polygon(op[2], _mul(col, (op[3] as Color).a))
+		elif t == CreatureParts.OP_CIRCLE:
+			ci.draw_circle(op[2], float(op[3]), _mul(col, (op[4] as Color).a))
+		elif t == CreatureParts.OP_ARC:
+			ci.draw_arc(op[2], float(op[3]), float(op[4]), float(op[5]), 14, _mul(col, (op[6] as Color).a), float(op[7]), true)
+		elif t == CreatureParts.OP_LINES:
+			ci.draw_multiline(op[2], _mul(col, (op[3] as Color).a), float(op[4]), true)
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 static func _dyn(ci: CanvasItem, op: Array, phase: float, alpha: float) -> void:
