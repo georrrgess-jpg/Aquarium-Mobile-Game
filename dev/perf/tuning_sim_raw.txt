@@ -1,1 +1,18 @@
 ## casual swell=0,0,0 (before)
+[sim] casual-before  n=60 cadence=3 size=3 w2=1.00 w3=1.00 | turns avg 300.0 med 300 min 300 max 300 | flooded 0/60 (before turn 15: 0) capped 60 stalls 0 tide-advances 0
+[sim] casual-before  empty cells at a Surge: avg 23.0 (first Surge avg 32.3, min 3) | merges avg 199.0 | releases avg 58.5 | first release turn avg 7.9
+## casual swell=20,20,3 (after)
+[sim] casual-after   n=60 cadence=3 size=3 w2=1.00 w3=1.00 | turns avg 69.5 med 69 min 57 max 90 | flooded 60/60 (before turn 15: 0) capped 0 stalls 0 tide-advances 0
+[sim] casual-after   empty cells at a Surge: avg 21.0 (first Surge avg 32.3, min 1) | merges avg 47.4 | releases avg 12.5 | first release turn avg 7.9
+## mid swell=0,0,0 (before)
+[sim] mid-before     n=60 cadence=3 size=3 w2=1.00 w3=1.00 | turns avg 300.0 med 300 min 300 max 300 | flooded 0/60 (before turn 15: 0) capped 60 stalls 0 tide-advances 0
+[sim] mid-before     empty cells at a Surge: avg 31.9 (first Surge avg 32.8, min 15) | merges avg 226.0 | releases avg 62.1 | first release turn avg 4.8
+## mid swell=20,20,3 (after)
+[sim] mid-after      n=60 cadence=3 size=3 w2=1.00 w3=1.00 | turns avg 110.2 med 99 min 69 max 300 | flooded 59/60 (before turn 15: 0) capped 1 stalls 0 tide-advances 0
+[sim] mid-after      empty cells at a Surge: avg 20.9 (first Surge avg 32.8, min 1) | merges avg 94.5 | releases avg 30.6 | first release turn avg 4.8
+## expert swell=0,0,0 (before)
+[sim] expert-before  n=60 cadence=3 size=3 w2=1.00 w3=1.00 | turns avg 300.0 med 300 min 300 max 300 | flooded 0/60 (before turn 15: 0) capped 60 stalls 0 tide-advances 0
+[sim] expert-before  empty cells at a Surge: avg 38.3 (first Surge avg 34.3, min 33) | merges avg 239.7 | releases avg 63.1 | first release turn avg 2.4
+## expert swell=20,20,3 (after)
+[sim] expert-after   n=60 cadence=3 size=3 w2=1.00 w3=1.00 | turns avg 140.7 med 138 min 93 max 240 | flooded 60/60 (before turn 15: 0) capped 0 stalls 0 tide-advances 0
+[sim] expert-after   empty cells at a Surge: avg 25.1 (first Surge avg 34.3, min 3) | merges avg 147.8 | releases avg 47.5 | first release turn avg 2.4
