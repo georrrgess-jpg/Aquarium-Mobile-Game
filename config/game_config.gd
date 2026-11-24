@@ -38,14 +38,16 @@ const CHAIN_MULT_DEN: int = 2
 # Shrimp = 1, Starfish = 2.
 #  * Opening merge: the two tier-1 Shrimp at (4,1)+(4,2). The result touches two
 #    tier-2 Shrimp, so it chains into a tier-3 and earns a Current back.
-#  * Useful Current: row 1 holds three tier-2 Starfish. Shifting it LEFT wraps
-#    the edge Starfish round and makes a line -> tier 4.
-#  * Reachable tier 4 by plain pair merge: tier-3 Shrimp at (6,4) waits for the
-#    chain's tier-3, and the two tier-3 Starfish merge anywhere on the board.
+#  * Useful Current: row 1 holds three tier-1 Starfish. Shifting it LEFT wraps the edge
+#    Starfish round and makes a line -> a tier-3 Starfish in the middle (1,4).
+#  * Guided route (3 turns): 1) merge the Shrimp pair (chain, +1 Current); 2) preview and
+#    commit the Current on row 2, left (a line -> tier-3 Starfish); 3) merge the two tier-3
+#    Starfish (or the two tier-3 Shrimp) -> tier 4, and the 3rd turn raises the first Surge.
+#    Then release the tier 4 through the Reef Gate (free). Verified by tests/test_onboarding.gd.
 const STARTER_LAYOUT: Array = [
 	[4, 1, 1, 1], [4, 2, 1, 1],
 	[3, 2, 1, 2], [4, 3, 1, 2],
-	[1, 0, 2, 2], [1, 4, 2, 2], [1, 5, 2, 2],
+	[1, 0, 2, 1], [1, 4, 2, 1], [1, 5, 2, 1],
 	[6, 4, 1, 3],
 	[0, 2, 2, 1], [5, 5, 2, 1],
 	[2, 4, 2, 3], [5, 1, 2, 3],
@@ -112,6 +114,10 @@ const DAILY_GOALS: Array = [
 	{"id": "release", "label": "Release a tier 4+ creature", "target": 1, "coins": 100, "pearls": 2},
 ]
 
+# --- Guided start, Calm Pool (Update 4) -----------------------------------------------------
+const CALM_CADENCE: int = 5            # Calm Pool: a Surge every fifth turn
+const CALM_START_CREATURES: int = 9    # a roomier start than a standard run
+
 # --- Seeds ---------------------------------------------------------------------
 const DEFAULT_BASE_SEED: int = 20260101
 
@@ -126,5 +132,5 @@ const T_FLOOD_NOTICE: float = 1.8
 const DRAG_THRESHOLD: float = 10.0
 
 # --- Persistence ---------------------------------------------------------------
-const SAVE_VERSION: int = 3
+const SAVE_VERSION: int = 4
 const SAVE_PATH: String = "user://tidepool_save.json"

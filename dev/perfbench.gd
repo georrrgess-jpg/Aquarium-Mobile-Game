@@ -199,7 +199,7 @@ func scenario_pool() -> void:
 	await frames(30)
 	rec_start()
 	for step in 14:
-		_label = "step %d (%s)" % [step, ["slide", "merge", "current-preview", "merge", "slide", "merge", "merge"][step % 7]]
+		_label = "step %d (%s)" % [step, ["slide", "merge", "current", "merge", "slide", "merge", "merge"][step % 7]]
 		skip_planning()
 		var b: Board = se.run.board
 		match step % 7:
@@ -229,7 +229,10 @@ func scenario_pool() -> void:
 				await click(tab_pos(0, 3))
 				await click_btn(pool().btn_dir_a)
 				await click_btn(pool().btn_dir_b)
-				await click_btn(pool().btn_current)
+				if step >= 7:
+					await click_btn(pool().btn_confirm)           # second cycle: commit the Current
+				else:
+					await click_btn(pool().btn_current)           # first cycle: cancel the preview
 		await idle()
 		if se.run.status != RunState.ACTIVE:
 			break

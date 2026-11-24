@@ -57,7 +57,49 @@ static func migrate(doc: Dictionary) -> Dictionary:
 		v = 2
 	if v == 2:
 		doc = _v2_to_v3(doc)
+		v = 3
+	if v == 3:
+		doc = _v3_to_v4(doc)
 	return doc
+
+## Update 3 -> Update 4: guided-start state, Book (backfilled from residents and the active
+## board), per-Trial flags (the old single Trial becomes "wrap"), Calm Pool slot. Existing
+## players skip the guided start; a save that is mid-guided-run resumes it where it was.
+static func _v3_to_v4(doc: Dictionary) -> Dictionary:
+	var out: Dictionary = doc.duplicate(true)
+	var prof: Dictionary = out.get("profile", {})
+	var run: Variant = out.get("run")
+	# Mid-guided = the old guided run that has not released anything yet. (Update 1-3 never cleared the
+	# flag after the release, so a flagged run that already released counts as finished.)
+	var mid_guided: bool = typeof(run) == TYPE_DICTIONARY and bool((run as Dictionary).get("tutorial", false)) and int(((run as Dictionary).get("stats", {}) as Dictionary).get("releases", 0)) == 0 and (prof.get("residents", []) as Array).is_empty()
+	prof["tutorial"] = prof.get("tutorial", {"done": not mid_guided, "skipped": false, "milestone": not mid_guided and (prof.get("residents", []) as Array).size() > 0, "restarts": 0})
+	if mid_guided:
+		var r: Dictionary = run
+		var st: Dictionary = r.get("stats", {})
+		r["tut_flags"] = r.get("tut_flags", {"pair": int(r.get("turn", 0)) >= 1, "current": int(st.get("shifts", 0)) > 0, "surge": int(r.get("turn", 0)) >= 3, "release": false})
+	elif typeof(run) == TYPE_DICTIONARY:
+		(run as Dictionary)["tutorial"] = false
+	var book: Dictionary = prof.get("book", {})
+	for res in prof.get("residents", []):
+		var code: int = int(res.get("code", 0))
+		if code > 0:
+			book["%d:%d" % [int(code / 10.0), code % 10]] = {"seen": true, "made": true, "released": true}
+	if typeof(run) == TYPE_DICTIONARY:
+		for c in (run as Dictionary).get("board", []):
+			var cc: int = int(c)
+			if cc > 0:
+				var key: String = "%d:%d" % [int(cc / 10.0), cc % 10]
+				if not book.has(key):
+					book[key] = {"seen": true, "made": false, "released": false}
+	prof["book"] = book
+	var trials: Dictionary = prof.get("trials", {})
+	if not trials.has("wrap"):
+		trials["wrap"] = prof.get("trial", {"cleared": false, "claimed": false})
+	prof["trials"] = trials
+	prof["calm"] = prof.get("calm", {"run": {}, "plays": 0})
+	out["profile"] = prof
+	out["version"] = 4
+	return out
 
 ## Update 2 -> Update 3: visitor, daily goals and trial flags appear, empty. An active run
 ## from before tides keeps rolling on the base spawn table (tide -1).

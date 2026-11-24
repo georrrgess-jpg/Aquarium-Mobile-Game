@@ -484,7 +484,7 @@ func t_migration() -> void:
 			check(s.profile.decorations.size() == raw["profile"]["decorations"].size() and s.profile.decorations.size() > 0, "[%s] decorations kept" % name)
 		s.save()
 		var doc: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(dst))
-		check(int(doc["version"]) == 3, "[%s] re-saved as version 3" % name)
+		check(int(doc["version"]) == GameConfig.SAVE_VERSION, "[%s] re-saved as the current version" % name)
 		var s2 := GameSession.new()
 		s2.save_path = dst
 		s2.load_or_new()

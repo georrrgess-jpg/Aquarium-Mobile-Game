@@ -536,7 +536,7 @@ func t_seed_determinism() -> void:
 	check(has_pair, "random layout always contains an opening merge")
 
 func t_starter_first_run_reachability() -> void:
-	print("[starter layout: Current -> tier 4 -> Reef Gate]")
+	print("[starter layout: the designed 3-turn route to a release]")
 	var path := "user://test_starter2.json"
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
@@ -544,15 +544,17 @@ func t_starter_first_run_reachability() -> void:
 	s.save_path = path
 	s.start_run()
 	var pv: Dictionary = s.preview_current(Board.AXIS_ROW, 1, -1)
-	check(pv["changes"] and pv["best_tier"] == 4, "starter row 1 shifted left makes a tier 4")
+	check(pv["changes"] and pv["best_tier"] == 3, "starter row 1 shifted left makes a tier 3 (the wrap makes a line)")
 	var r: Dictionary = s.try_current(Board.AXIS_ROW, 1, -1)
-	check(r["ok"] and s.run.board.code_at(_i(1, 4)) == _code("F", 4), "wrapped Current builds the tier 4 Starfish")
-	var rel: Dictionary = s.try_release(_i(1, 4))
+	check(r["ok"] and s.run.board.code_at(_i(1, 4)) == _code("F", 3), "wrapped Current builds a tier-3 Starfish")
+	s.try_pair(_i(1, 4), _i(2, 4))
+	check(s.run.board.code_at(_i(2, 4)) == _code("F", 4), "merged with the other tier-3 Starfish -> tier 4")
+	s.land_surge()
+	var rel: Dictionary = s.try_release(_i(2, 4))
 	check(rel["ok"] and s.profile.residents.size() == 1, "and it can be released")
 	var s2 := GameSession.new()
 	s2.save_path = path
 	s2.start_run()
-	_goals_done(s2)
 	s2.try_pair(_i(4, 1), _i(4, 2))        # opening merge + chain -> S3 at (4,2)
 	var r2: Dictionary = s2.try_pair(_i(4, 2), _i(6, 4))   # S3 + S3 -> S4
 	check(r2["ok"] and s2.run.board.code_at(_i(6, 4)) == _code("S", 4), "pair route to tier 4 is reachable on turn 2")

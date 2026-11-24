@@ -23,7 +23,12 @@ var unseen_residents: Array = []
 ## Update 3: Lantern Ray visitor state, daily goals, Tide Trial first-clear flags.
 var visitor: Dictionary = Visitor.default_state()
 var daily: Dictionary = DailyGoals.default_state()
-var trial: Dictionary = {"cleared": false, "claimed": false}
+var trial: Dictionary = {"cleared": false, "claimed": false}      # Update 3 (kept for old saves; see `trials`)
+## Update 4: guided-start progress, the Tidepool Book, every Trial's first-clear flags, Calm Pool board.
+var tutorial: Dictionary = Tutorial.default_state()
+var book: Dictionary = {}              # "family:tier" -> {seen, made, released}
+var trials: Dictionary = {}            # trial id -> {cleared, claimed}
+var calm: Dictionary = {"run": {}, "plays": 0}
 
 func to_dict() -> Dictionary:
 	return {
@@ -43,6 +48,10 @@ func to_dict() -> Dictionary:
 		"visitor": visitor.duplicate(true),
 		"daily": daily.duplicate(true),
 		"trial": trial.duplicate(true),
+		"tutorial": tutorial.duplicate(true),
+		"book": book.duplicate(true),
+		"trials": trials.duplicate(true),
+		"calm": calm.duplicate(true),
 	}
 
 static func from_dict(d: Dictionary) -> Profile:
@@ -91,6 +100,19 @@ static func from_dict(d: Dictionary) -> Profile:
 		p.daily["done"][String(k)] = bool(dl["done"][k])
 	var tr: Dictionary = d.get("trial", {})
 	p.trial = {"cleared": bool(tr.get("cleared", false)), "claimed": bool(tr.get("claimed", false))}
+	var tu: Dictionary = d.get("tutorial", {})
+	p.tutorial = {"done": bool(tu.get("done", false)), "skipped": bool(tu.get("skipped", false)),
+		"milestone": bool(tu.get("milestone", false)), "restarts": int(tu.get("restarts", 0))}
+	p.book = {}
+	for k in d.get("book", {}):
+		var e: Dictionary = d["book"][k]
+		p.book[String(k)] = {"seen": bool(e.get("seen", false)), "made": bool(e.get("made", false)), "released": bool(e.get("released", false))}
+	p.trials = {}
+	for k in d.get("trials", {}):
+		var te: Dictionary = d["trials"][k]
+		p.trials[String(k)] = {"cleared": bool(te.get("cleared", false)), "claimed": bool(te.get("claimed", false))}
+	var cm: Dictionary = d.get("calm", {})
+	p.calm = {"run": cm.get("run", {}), "plays": int(cm.get("plays", 0))}
 	return p
 
 func tier_counts() -> Dictionary:

@@ -198,6 +198,9 @@ static func draw_icon(ci: CanvasItem, kind: String, c: Vector2, s: float, col: C
 		"moon":      # crescent
 			ci.draw_circle(c, h * 0.8, col)
 			ci.draw_circle(c + Vector2(h * 0.4, -h * 0.25), h * 0.7, Color(0.04, 0.2, 0.3))
+		"help":
+			ci.draw_arc(c, h * 0.9, 0.0, TAU, 20, col, maxf(2.0, s * 0.12), true)
+			ci.draw_string(ThemeDB.fallback_font, c + Vector2(-h * 0.45, h * 0.5), "?", HORIZONTAL_ALIGNMENT_CENTER, h * 0.9, int(s * 0.95), col)
 		"goal":
 			ci.draw_arc(c, h * 0.85, 0.0, TAU, 20, col, maxf(2.0, s * 0.12), true)
 			ci.draw_arc(c, h * 0.5, 0.0, TAU, 16, col, maxf(2.0, s * 0.12), true)

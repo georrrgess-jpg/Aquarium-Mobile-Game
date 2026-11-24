@@ -116,29 +116,59 @@ class SurgeStrip extends Control:
 
 class Toast extends PanelContainer:
 	var label: Label
+	var icon_box: Control
+	var kind: String = "info"
 	var _tw: Tween
+	var _sb: StyleBoxFlat = StyleBoxFlat.new()
+	const KINDS: Dictionary = {
+		"info": {"color": Color("ff7f6b"), "icon": ""},
+		"invalid": {"color": Color("ff7f6b"), "icon": "x"},        # not a legal target
+		"capped": {"color": Color("ffd166"), "icon": "up"},        # top tier reached
+		"nocurrent": {"color": Color("8fd8ff"), "icon": "wave"},   # no Current charge left
+		"resolving": {"color": Color("ff9e5e"), "icon": "tide"},   # the tide is landing
+		"ended": {"color": Color("ff6f61"), "icon": "tide"},
+	}
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.04, 0.2, 0.26, 0.95)
-		sb.border_color = Pal.CORAL
-		sb.set_border_width_all(2)
-		sb.set_corner_radius_all(14)
-		sb.content_margin_left = 14
-		sb.content_margin_right = 14
-		sb.content_margin_top = 8
-		sb.content_margin_bottom = 8
-		add_theme_stylebox_override("panel", sb)
+		_sb.bg_color = Color(0.04, 0.2, 0.26, 0.96)
+		_sb.border_color = Pal.CORAL
+		_sb.set_border_width_all(2)
+		_sb.set_corner_radius_all(14)
+		_sb.content_margin_left = 12
+		_sb.content_margin_right = 14
+		_sb.content_margin_top = 8
+		_sb.content_margin_bottom = 8
+		add_theme_stylebox_override("panel", _sb)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(row)
+		icon_box = Control.new()
+		icon_box.custom_minimum_size = Vector2(26, 26)
+		icon_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon_box.draw.connect(func() -> void:
+			var ic: String = String((KINDS[kind] as Dictionary)["icon"])
+			if ic != "":
+				PillButton.draw_icon(icon_box, ic, Vector2(13, 13), 22.0, (KINDS[kind] as Dictionary)["color"]))
+		row.add_child(icon_box)
 		label = Label.new()
 		label.add_theme_font_size_override("font_size", 18)
 		label.add_theme_color_override("font_color", Pal.TEXT)
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.custom_minimum_size = Vector2(320, 0)
-		add_child(label)
+		label.custom_minimum_size = Vector2(280, 0)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(label)
 		modulate.a = 0.0
 		visible = false
 	func show_text(text: String, secs: float = 1.6) -> void:
+		show_kind(text, "info", secs)
+	## `kind` picks the border colour and a symbol, so the five reasons a move can be refused
+	## (invalid target, capped tier, no Current, tide landing, ended) look different at a glance.
+	func show_kind(text: String, k: String, secs: float = 1.6) -> void:
+		kind = k if KINDS.has(k) else "info"
+		_sb.border_color = (KINDS[kind] as Dictionary)["color"]
+		icon_box.visible = String((KINDS[kind] as Dictionary)["icon"]) != ""
+		icon_box.queue_redraw()
 		label.text = text
 		visible = true
 		reset_size()

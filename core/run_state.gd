@@ -21,6 +21,17 @@ var tide: int = -1
 var spawn_table: Array = []
 ## Trial boards turn the Surge cycle off.
 var surge_enabled: bool = true
+## Update 4. "regular" or "calm" (Calm Pool practice). Cadence/size are fixed when the run starts,
+## so retuning later never changes a run that is already in progress.
+var mode: String = "regular"
+var cadence: int = GameConfig.SURGE_CADENCE
+var surge_size: int = GameConfig.SURGE_SIZE
+## Guided first run: which steps are done ({pair, current, surge, release}), saved with the board.
+var tut_flags: Dictionary = {}
+## A restarted guided board: pays no coins/pearls and records no goals until the tutorial finishes.
+var practice: bool = false
+## One optional Tide Goal per standard run, set when the run begins: {id, label, family, target, progress, done}.
+var goal: Dictionary = {}
 var tutorial: bool = false
 var elapsed: float = 0.0
 var stats: Dictionary = {}
@@ -39,6 +50,9 @@ static func default_stats() -> Dictionary:
 		"releases": 0,
 		"shifts": 0,
 		"tides": 0,
+		"best_merge_tier": 0,    # highest tier a merge produced this run
+		"best_chain_merges": 0,  # most merges in one chain (including the first)
+		"lines": 0,              # three-in-a-row merges
 	}
 
 func to_dict() -> Dictionary:
@@ -54,6 +68,12 @@ func to_dict() -> Dictionary:
 		"run_number": run_number,
 		"tide": tide,
 		"spawn_table": spawn_table.duplicate(true),
+		"mode": mode,
+		"cadence": cadence,
+		"surge_size": surge_size,
+		"tut_flags": tut_flags.duplicate(true),
+		"practice": practice,
+		"goal": goal.duplicate(true),
 		"tutorial": tutorial,
 		"elapsed": elapsed,
 		"stats": stats.duplicate(true),
@@ -73,6 +93,16 @@ static func from_dict(d: Dictionary) -> RunState:
 		r.pending_surge.append({"cell": int(p["cell"]), "code": int(p["code"])})
 	r.flood_info = d.get("flood_info", {})
 	r.run_number = int(d.get("run_number", 1))
+	r.mode = String(d.get("mode", "regular"))
+	r.cadence = int(d.get("cadence", GameConfig.SURGE_CADENCE))
+	r.surge_size = int(d.get("surge_size", GameConfig.SURGE_SIZE))
+	r.practice = bool(d.get("practice", false))
+	for k in d.get("tut_flags", {}):
+		r.tut_flags[String(k)] = bool(d["tut_flags"][k])
+	var g: Dictionary = d.get("goal", {})
+	for k in g:
+		var v: Variant = g[k]
+		r.goal[String(k)] = int(v) if (typeof(v) == TYPE_FLOAT and float(v) == floorf(float(v))) else v
 	r.tide = int(d.get("tide", -1))
 	r.spawn_table = []
 	for e in d.get("spawn_table", []):
@@ -86,5 +116,4 @@ static func from_dict(d: Dictionary) -> RunState:
 	return r
 
 func turns_until_surge() -> int:
-	var c: int = GameConfig.SURGE_CADENCE
-	return c - (turn % c)
+	return cadence - (turn % cadence)

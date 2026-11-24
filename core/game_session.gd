@@ -24,6 +24,9 @@ var autosave: bool = true
 var base_seed: int = GameConfig.DEFAULT_BASE_SEED
 ## Test/dev only: pretend there are no legal actions (see is_stuck).
 var force_stuck_for_testing: bool = false
+## Sandbox sessions (Calm Pool, Trials, Help practice) run on their own throwaway Profile. A
+## session may route its save somewhere else (Calm Pool stores its board in the real profile).
+var save_hook: Callable = Callable()
 
 # --- Lifecycle -------------------------------------------------------------------
 
@@ -39,6 +42,9 @@ func load_or_new() -> void:
 	ReefEconomy.settle(profile, GameClock.now())
 
 func save() -> void:
+	if save_hook.is_valid():
+		save_hook.call()
+		return
 	if autosave:
 		SaveStore.write(save_path, profile, run)
 
@@ -62,7 +68,9 @@ func start_run(layout: Board = null) -> void:
 	run.currents = GameConfig.START_CURRENTS
 	run.tide = Tide.phase_at()
 	run.spawn_table = Tide.spawn_table(run.tide)       # fixed for the life of this run
-	run.tutorial = (n == 1)
+	run.tutorial = layout == null and not bool(profile.tutorial.get("done", false)) and not bool(profile.tutorial.get("skipped", false))
+	if run.tutorial:
+		run.tut_flags = Tutorial.new_flags()
 	if layout != null:
 		run.board = layout
 	elif run.tutorial:
@@ -87,6 +95,56 @@ func set_setting(key: String, value: bool) -> void:
 	profile.settings[key] = value
 	save()
 
+# --- Guided start lifecycle (Update 4) -----------------------------------------------------
+
+## Replace the guided board with a fresh one. Banked rewards stay; the restarted board pays
+## nothing (coins, pearls, goals) until the tutorial is finished.
+func restart_tutorial() -> void:
+	profile.tutorial["restarts"] = int(profile.tutorial.get("restarts", 0)) + 1
+	var n: int = run.run_number if run != null else profile.runs_started
+	run = RunState.new()
+	run.run_number = n
+	run.seed_value = (base_seed + (n - 1) * 7919 + 31 * int(profile.tutorial["restarts"])) & 0xFFFFFFFF
+	run.rng = SeededRng.new(run.seed_value)
+	run.currents = GameConfig.START_CURRENTS
+	run.tide = Tide.phase_at()
+	run.spawn_table = Tide.spawn_table(run.tide)
+	run.tutorial = true
+	run.practice = true
+	run.tut_flags = Tutorial.new_flags()
+	run.board = _starter_board()
+	save()
+
+## Leave the guided start. The unfinished guided board is dropped, committed rewards stay,
+## and the next Play begins an ordinary fresh run.
+func skip_tutorial() -> void:
+	profile.tutorial["skipped"] = true
+	profile.tutorial["done"] = true
+	end_run(false)
+	save()
+
+## A separate guided board for Help replays: no permanent payout, never saved.
+static func new_tutorial_sandbox() -> GameSession:
+	var s := GameSession.new()
+	s.autosave = false
+	s.profile = Profile.new()
+	s.profile.tutorial = {"done": false, "skipped": false, "milestone": true, "restarts": 0}
+	s.run = RunState.new()
+	s.run.tutorial = true
+	s.run.practice = true
+	s.run.tut_flags = Tutorial.new_flags()
+	s.run.currents = GameConfig.START_CURRENTS
+	s.run.rng = SeededRng.new(4242)
+	s.run.tide = Tide.MIDDAY
+	s.run.spawn_table = Tide.spawn_table(Tide.MIDDAY)
+	s.run.board = s._starter_board()
+	return s
+
+func tutorial_step() -> int:
+	if run == null or not run.tutorial:
+		return Tutorial.STEPS.size()
+	return Tutorial.step_of(run.tut_flags)
+
 # --- Layouts ---------------------------------------------------------------------
 
 func _starter_board() -> Board:
@@ -95,11 +153,11 @@ func _starter_board() -> Board:
 		b.set_code(Board.idx(e[0], e[1]), Creature.make(e[2], e[3]))
 	return b
 
-func _random_board() -> Board:
+func _random_board(count: int = GameConfig.START_CREATURES) -> Board:
 	var b := Board.new()
 	var pool: Array = range(Board.cell_count())
 	var placed: Array = []
-	for i in GameConfig.START_CREATURES:
+	for i in count:
 		var j: int = i + run.rng.int_range(0, pool.size() - 1 - i)
 		var tmp: Variant = pool[i]
 		pool[i] = pool[j]
@@ -213,11 +271,22 @@ func _new_result() -> Dictionary:
 		"goals_done": [], "visitor_created": false, "visitor_complete": false,
 	}
 
-func _reject(reason: String) -> Dictionary:
+## Rejections carry a kind so the UI can tell them apart:
+## invalid (not a legal target), capped (tier 6), nocurrent (no charge left),
+## resolving (a Surge is landing), ended (the pool has flooded).
+func _reject(reason: String, kind: String = "invalid") -> Dictionary:
 	var r: Dictionary = _new_result()
 	r["ok"] = false
 	r["reason"] = reason
+	r["kind"] = kind
 	return r
+
+func _block_kind(reason: String) -> String:
+	if reason == "A Surge is landing":
+		return "resolving"
+	if reason == "The pool has flooded":
+		return "ended"
+	return "invalid"
 
 ## Dispatch for a drag/tap from `src` onto `dst`.
 func try_drop(src: int, dst: int) -> Dictionary:
@@ -228,7 +297,7 @@ func try_drop(src: int, dst: int) -> Dictionary:
 func try_pair(src: int, dst: int) -> Dictionary:
 	var why: String = _block_reason()
 	if why != "":
-		return _reject(why)
+		return _reject(why, _block_kind(why))
 	var b: Board = run.board
 	var n: int = b.cells.size()
 	if src < 0 or src >= n or dst < 0 or dst >= n or src == dst:
@@ -239,7 +308,7 @@ func try_pair(src: int, dst: int) -> Dictionary:
 	if b.code_at(dst) != code:
 		return _reject("Only identical creatures merge")
 	if Creature.tier_of(code) >= GameConfig.MAX_TIER:
-		return _reject("Top tier! Send it through the Reef Gate")
+		return _reject("Top tier! Send it through the Reef Gate", "capped")
 	var res: Dictionary = _new_result()
 	res["turn_used"] = true
 	var result_code: int = code + 1
@@ -261,7 +330,7 @@ func try_pair(src: int, dst: int) -> Dictionary:
 func try_move(src: int, dst: int) -> Dictionary:
 	var why: String = _block_reason()
 	if why != "":
-		return _reject(why)
+		return _reject(why, _block_kind(why))
 	var b: Board = run.board
 	var n: int = b.cells.size()
 	if src < 0 or src >= n or dst < 0 or dst >= n or src == dst:
@@ -286,9 +355,9 @@ func try_move(src: int, dst: int) -> Dictionary:
 func try_current(axis: int, index: int, dir: int) -> Dictionary:
 	var why: String = _block_reason()
 	if why != "":
-		return _reject(why)
+		return _reject(why, _block_kind(why))
 	if run.currents <= 0:
-		return _reject("No Currents left")
+		return _reject("No Currents left", "nocurrent")
 	var b: Board = run.board
 	var shifted: PackedInt32Array = b.shifted(axis, index, dir)
 	var res: Dictionary = _new_result()
@@ -313,7 +382,7 @@ func try_release(cell: int) -> Dictionary:
 	if run == null:
 		return _reject("No run in progress")
 	if run.status == RunState.ACTIVE and not run.pending_surge.is_empty():
-		return _reject("A Surge is landing")
+		return _reject("A Surge is landing", "resolving")
 	var b: Board = run.board
 	if cell < 0 or cell >= b.cells.size() or b.code_at(cell) == 0:
 		return _reject("Pick a creature first")
@@ -321,6 +390,17 @@ func try_release(cell: int) -> Dictionary:
 	if Creature.tier_of(code) < GameConfig.RELEASE_MIN_TIER:
 		return _reject("The Reef Gate wants tier %d or higher" % GameConfig.RELEASE_MIN_TIER)
 	var res: Dictionary = _new_result()
+	# Calm Pool and Help practice never create residents ("set free" only). A restarted guided
+	# board creates the resident only for the first-release milestone, once.
+	var permanent: bool = run.mode == "regular" and (not run.practice or not bool(profile.tutorial.get("milestone", false)))
+	if run.mode != "regular" or (run.practice and not permanent):
+		b.set_code(cell, 0)
+		run.stats["releases"] += 1
+		res["events"].append({"t": "release", "cell": cell, "code": code, "resident_id": -1})
+		Tutorial.observe(run, res)
+		_finish_tutorial_if_done(res)
+		save()
+		return res
 	ReefEconomy.settle(profile, GameClock.now())   # old rate is paid before the roster changes it
 	b.set_code(cell, 0)
 	var rid: int = profile.next_resident_id
@@ -332,10 +412,14 @@ func try_release(cell: int) -> Dictionary:
 	profile.unseen_residents.append(rid)
 	run.stats["releases"] += 1
 	res["events"].append({"t": "release", "cell": cell, "code": code, "resident_id": rid})
+	if run.tutorial:
+		Tutorial.observe(run, res)
+		profile.tutorial["milestone"] = true
+		res["first_release"] = true
 	# Update 3: this release may finish the Lantern Ray's request and count toward a daily goal.
 	# Everything below is written by the single save() at the end, so a reload can never see
 	# the release without the resident or the resident without the finished request.
-	if Visitor.on_release(profile, code):
+	if not run.practice and Visitor.on_release(profile, code):
 		var ray_id: int = profile.next_resident_id
 		profile.next_resident_id += 1
 		var ray_code: int = Creature.make(Creature.RAY, GameConfig.VISITOR_RESIDENT_TIER)
@@ -343,9 +427,19 @@ func try_release(cell: int) -> Dictionary:
 		profile.unseen_residents.append(ray_id)
 		res["visitor_complete"] = true
 		res["events"].append({"t": "visitor_arrives", "resident_id": ray_id})
-	res["goals_done"].append_array(DailyGoals.record(profile, "release", 1))
+	if not run.practice:
+		res["goals_done"].append_array(DailyGoals.record(profile, "release", 1))
+	_finish_tutorial_if_done(res)
 	save()
 	return res
+
+## The release step completes the guided start.
+func _finish_tutorial_if_done(res: Dictionary) -> void:
+	if run.tutorial and bool(run.tut_flags.get("release", false)):
+		run.tutorial = false
+		run.practice = false
+		profile.tutorial["done"] = true
+		res["tutorial_done"] = true
 
 ## When truly stuck, jump the tide to the next Surge.
 func advance_tide() -> Dictionary:
@@ -353,7 +447,7 @@ func advance_tide() -> Dictionary:
 		return _reject("You still have moves")
 	var res: Dictionary = _new_result()
 	res["turn_used"] = true
-	var c: int = GameConfig.SURGE_CADENCE
+	var c: int = run.cadence
 	run.turn = (int(run.turn / float(c)) + 1) * c
 	run.stats["tides"] += 1
 	res["events"].append({"t": "tide"})
@@ -370,6 +464,8 @@ func land_surge() -> Dictionary:
 		run.board.set_code(int(p["cell"]), int(p["code"]))
 		res["events"].append({"t": "land", "cell": int(p["cell"]), "code": int(p["code"])})
 	run.pending_surge = []
+	if run.tutorial:
+		run.tut_flags["surge"] = true            # the player has now watched a Surge land
 	# Landing never triggers matches (spec): no resolve() here.
 	save()
 	return res
@@ -446,6 +542,9 @@ static func _changed_cells(before: PackedInt32Array, after: PackedInt32Array) ->
 func _pay(res: Dictionary, ev: Dictionary) -> void:
 	var coins: int = Rewards.coins_for(int(ev["tier"]), int(ev["step"]))
 	var pearls: int = Rewards.pearls_for(int(ev["tier"]), int(ev["step"]))
+	if run.practice:                       # restarted guided board: shown as zero, nothing is paid
+		coins = 0
+		pearls = 0
 	ev["coins"] = coins
 	ev["pearls"] = pearls
 	profile.coins += coins
@@ -454,6 +553,7 @@ func _pay(res: Dictionary, ev: Dictionary) -> void:
 	run.stats["pearls"] += pearls
 	res["coins"] += coins
 	res["pearls"] += pearls
+	run.stats["best_merge_tier"] = maxi(int(run.stats.get("best_merge_tier", 0)), int(ev["tier"]))
 	res["chain"] = maxi(int(res["chain"]), int(ev["step"]))
 
 func _apply_steps(res: Dictionary, steps: Array) -> void:
@@ -483,6 +583,9 @@ func _apply_steps(res: Dictionary, steps: Array) -> void:
 ## Daily goals and the Lantern Ray's progress come from COMMITTED events only (never from a
 ## preview): the merges this action produced and whether it used a Current.
 func _record_progress(res: Dictionary) -> void:
+	Tutorial.observe(run, res)
+	if run.practice or run.mode != "regular":
+		return                                  # practice boards earn no goals, sightings or visitor progress
 	var merges: int = 0
 	var used_current: bool = false
 	for ev in res["events"]:
@@ -500,7 +603,7 @@ func _record_progress(res: Dictionary) -> void:
 
 func _finish_turn(res: Dictionary) -> void:
 	run.turn += 1
-	if run.surge_enabled and run.turn % GameConfig.SURGE_CADENCE == 0:
+	if run.surge_enabled and run.turn % run.cadence == 0:
 		_prepare_surge(res)
 	save()
 
@@ -508,15 +611,21 @@ func _finish_turn(res: Dictionary) -> void:
 ## no partial wave.
 func _prepare_surge(res: Dictionary) -> void:
 	var empties: PackedInt32Array = run.board.empty_cells()
-	if empties.size() < GameConfig.SURGE_SIZE:
+	if empties.size() < run.surge_size and run.mode == "calm":
+		# Calm Pool: a full board is a recoverable reset, never a flood
+		run.board = _random_board(GameConfig.CALM_START_CREATURES)
+		res["events"].append({"t": "calm_reset"})
+		res["calm_reset"] = true
+		return
+	if empties.size() < run.surge_size:
 		run.status = RunState.FLOODED
-		run.flood_info = {"free": empties.size(), "need": GameConfig.SURGE_SIZE}
+		run.flood_info = {"free": empties.size(), "need": run.surge_size}
 		res["flood"] = true
-		res["events"].append({"t": "flood", "free": empties.size(), "need": GameConfig.SURGE_SIZE})
+		res["events"].append({"t": "flood", "free": empties.size(), "need": run.surge_size})
 		return
 	var pool: Array = Array(empties)
 	var picks: Array = []
-	for i in GameConfig.SURGE_SIZE:
+	for i in run.surge_size:
 		var j: int = i + run.rng.int_range(0, pool.size() - 1 - i)
 		var tmp: Variant = pool[i]
 		pool[i] = pool[j]

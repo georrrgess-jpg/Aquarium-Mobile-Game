@@ -7,6 +7,7 @@ extends Control
 
 signal play_pressed
 signal trial_pressed
+signal help_replay
 
 const PAD: float = 10.0
 const MAX_COL_W: float = 540.0
@@ -37,6 +38,8 @@ var btn_motion: PillButton
 var btn_sound: PillButton
 var btn_haptics: PillButton
 var toast: HudWidgets.Toast
+var btn_help: PillButton
+var help_sheet: PoolOverlays.HelpSheet
 var tide_badge: TideBadge
 var visitor_banner: VisitorBanner
 var btn_accept: PillButton
@@ -78,6 +81,15 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	btn_claim.pressed.connect(_claim)
 	tide_badge = TideBadge.new()
 	add_child(tide_badge)
+	btn_help = _btn("", "help", Pal.SAND)
+	btn_help.pressed.connect(func() -> void:
+		help_sheet.open())
+	help_sheet = PoolOverlays.HelpSheet.new()
+	add_child(help_sheet)
+	help_sheet.close.connect(func() -> void: help_sheet.visible = false)
+	help_sheet.replay.connect(func() -> void:
+		help_sheet.visible = false
+		help_replay.emit())
 	visitor_banner = VisitorBanner.new()
 	add_child(visitor_banner)
 	btn_accept = _btn("Accept", "check", Pal.CORAL)
@@ -160,6 +172,17 @@ func _btn(text: String, icon: String, accent: Color, parent: Node = null) -> Pil
 	(parent if parent != null else self).add_child(b)
 	return b
 
+## A brand-new profile (no run yet, guided start not done) sees only the living reef and Play.
+func is_minimal() -> bool:
+	return session != null and session.run == null and not bool(session.profile.tutorial.get("done", false))
+
+## From the first-release card: open the Decor tab with the first decoration ready to place.
+func focus_decor() -> void:
+	_show_tab("decor")
+	var first: Dictionary = GameConfig.DECORATIONS[0]
+	if session.profile.coins >= int(first["price"]) and not ReefEconomy.owns(session.profile, String(first["id"])):
+		_select_decor(0)
+
 ## Update 3 hook: add another tab whose controls live inside the panel.
 func register_tab(id: String, label: String, controls: Array) -> void:
 	_tabs.append({"id": id, "label": label, "controls": controls})
@@ -210,10 +233,40 @@ func _layout() -> void:
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_label.position = Vector2(x0 + 4.0, 2)
-	title_label.size = Vector2(iw - 150.0, 46)
+	title_label.size = Vector2(iw - 204.0, 46)
 	title_label.custom_minimum_size = Vector2(0, 46)
 	tide_badge.position = Vector2(x0 + iw - 144.0, 6)
 	tide_badge.size = Vector2(144, 40)
+	btn_help.position = Vector2(x0 + iw - 144.0 - 50.0, 6)
+	btn_help.size = Vector2(44, 40)
+	var mini: bool = is_minimal()
+	for c in [chip_coins, chip_pearls, chip_res, income, chest_banner, btn_claim, visitor_banner, btn_accept, panel]:
+		(c as Control).visible = not mini
+	for c in [btn_motion, btn_sound, btn_haptics]:
+		(c as Control).visible = true           # settings stay reachable from the very first screen
+	for tb in tab_buttons:
+		(tb as Control).visible = not mini
+	if mini:
+		# a new profile: the living reef and one big Play button, nothing else competing for attention
+		var ah: float = maxf(240.0, h - 58.0 - 8.0 - 72.0 - 8.0 - 40.0 - 14.0)
+		reef.position = Vector2(x0, 56.0)
+		reef.size = Vector2(iw, ah)
+		btn_play.position = Vector2(x0, 56.0 + ah + 8.0)
+		btn_play.size = Vector2(iw, 72)
+		btn_play.font_size = 30
+		var tw0: float = (iw - 2.0 * g) / 3.0
+		for i in 3:
+			var tb0: PillButton = [btn_motion, btn_sound, btn_haptics][i]
+			tb0.position = Vector2(x0 + float(i) * (tw0 + g), 56.0 + ah + 8.0 + 72.0 + 8.0)
+			tb0.size = Vector2(tw0, 40)
+			tb0.font_size = 15
+		toast.position = Vector2(x0 + 20.0, 56.0 + ah - 80.0)
+		toast.size = Vector2(iw - 40.0, 0)
+		var ow0: float = iw * 0.94
+		help_sheet.max_h = ah - 20.0
+		help_sheet.size = Vector2(ow0, minf(380.0, ah - 20.0))
+		help_sheet.position = Vector2((w - ow0) * 0.5, 66.0)
+		return
 	var y: float = 52.0
 	var chip_w: float = (iw - 2.0 * g) / 3.0
 	for i in 3:
@@ -286,6 +339,10 @@ func _layout() -> void:
 		tb.font_size = 15
 	toast.position = Vector2(x0 + 20.0, panel.position.y + 12.0)    # over the tab panel, never over the aquarium
 	toast.size = Vector2(iw - 40.0, 0)
+	var ow1: float = iw * 0.94
+	help_sheet.max_h = aq_h + 140.0
+	help_sheet.size = Vector2(ow1, minf(380.0, aq_h + 40.0))
+	help_sheet.position = Vector2((w - ow1) * 0.5, reef.position.y + 8.0)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED or (what == NOTIFICATION_VISIBILITY_CHANGED and visible and reef != null):
@@ -328,7 +385,7 @@ func _refresh_buttons() -> void:
 		_:
 			btn_play.icon = "wave"
 			if run == null:
-				btn_play.text = "Dive in"
+				btn_play.text = "Play" if is_minimal() else "Dive in"
 			elif run.status == RunState.FLOODED:
 				btn_play.text = "See run summary"
 			else:
@@ -550,6 +607,7 @@ func _accept_visitor() -> void:
 
 ## The player has looked at the reef: stop highlighting new arrivals.
 func leave() -> void:
+	help_sheet.visible = false
 	_cancel_placement()
 	session.acknowledge_residents()
 

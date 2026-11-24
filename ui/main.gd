@@ -11,6 +11,9 @@ var sfx: Sfx
 var hub: ReefHub
 var pool_screen: PoolScreen
 var trial_screen: PoolScreen
+var help_screen: PoolScreen
+var safe_top: float = 0.0
+var safe_bottom: float = 0.0
 var summary_screen: SummaryScreen
 var current: String = ""
 var args: Dictionary = {}
@@ -37,7 +40,8 @@ func _ready() -> void:
 	pool_screen = PoolScreen.new()
 	summary_screen = SummaryScreen.new()
 	trial_screen = PoolScreen.new()
-	for s in [hub, pool_screen, trial_screen, summary_screen]:
+	help_screen = PoolScreen.new()
+	for s in [hub, pool_screen, trial_screen, help_screen, summary_screen]:
 		var c: Control = s
 		c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		add_child(c)
@@ -52,15 +56,32 @@ func _ready() -> void:
 	trial_screen.claim_reward = Callable(session, "claim_trial_reward")
 	trial_screen.open_home.connect(func() -> void: _open_hub("start"))
 	trial_screen.trial_exit.connect(func() -> void: _open_hub("start"))
+	# guided practice from Help: the same pool UI on a separate board with no permanent payout
+	help_screen.setup(session, sfx)
+	help_screen.set_help(GameSession.new_tutorial_sandbox())
+	help_screen.anim_speed = float(args.get("speed", 1.0))
+	help_screen.open_home.connect(func() -> void: _open_hub("start"))
+	help_screen.trial_exit.connect(func() -> void: _open_hub("start"))
+	pool_screen.help_replay.connect(func() -> void: show_screen("help"))
+	hub.help_replay.connect(func() -> void: show_screen("help"))
+	pool_screen.open_reef_decor.connect(func() -> void:
+		_open_hub("pool")
+		hub.focus_decor())
 	hub.trial_pressed.connect(_on_hub_trial)
 	hub.play_pressed.connect(_on_hub_play)
-	pool_screen.open_reef.connect(func() -> void: _open_hub("pool"))
-	pool_screen.open_home.connect(func() -> void: _open_hub("start"))
+	pool_screen.open_reef.connect(func() -> void:
+		pool_screen.leave()
+		_open_hub("pool"))
+	pool_screen.open_home.connect(func() -> void:
+		pool_screen.leave()
+		_open_hub("start"))
 	pool_screen.run_flooded.connect(func() -> void: show_screen("summary"))
 	summary_screen.new_run_pressed.connect(_on_new_run)
 	summary_screen.reef_pressed.connect(func() -> void: _open_hub("summary"))
 	summary_screen.home_pressed.connect(func() -> void: _open_hub("start"))
 	_apply_tide(true)
+	_apply_safe_area()
+	resized.connect(_apply_safe_area)
 	show_screen("start")
 	if args.has("screen") and str(args["screen"]) == "pool" and session.run != null:
 		show_screen("pool")
@@ -82,6 +103,31 @@ func _notification(what: int) -> void:
 			if hub.visible:
 				hub.on_income_tick()
 
+## Safe areas: phones with notches/home indicators report an inset; every screen is laid out
+## inside it. `--safe=TOP,BOTTOM` (logical px) forces insets for testing on desktop.
+func _apply_safe_area() -> void:
+	var top: float = 0.0
+	var bottom: float = 0.0
+	if args.has("safe"):
+		var parts: PackedStringArray = str(args["safe"]).split(",")
+		top = float(parts[0]) if parts.size() > 0 else 0.0
+		bottom = float(parts[1]) if parts.size() > 1 else 0.0
+	else:
+		var win: Vector2i = DisplayServer.window_get_size()
+		var area: Rect2i = DisplayServer.get_display_safe_area()
+		var scr: Vector2i = DisplayServer.screen_get_size()
+		if win.x > 0 and scr.x > 0 and area.size.x > 0 and area.size.y > 0 and area.size != scr:
+			var k: float = size.y / float(maxi(1, win.y))      # window px -> logical px
+			top = maxf(0.0, float(area.position.y)) * k
+			bottom = maxf(0.0, float(scr.y - area.end.y)) * k
+	safe_top = top
+	safe_bottom = bottom
+	for sc in [hub, pool_screen, trial_screen, help_screen, summary_screen]:
+		var c: Control = sc
+		c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		c.offset_top = top
+		c.offset_bottom = -bottom
+
 func _parse_args() -> Dictionary:
 	var out: Dictionary = {}
 	for a in OS.get_cmdline_user_args():
@@ -101,11 +147,15 @@ func _draw() -> void:
 func show_screen(name: String) -> void:
 	if name == "reef":
 		name = "hub_pool"
+	for sc in [pool_screen, trial_screen, help_screen]:
+		if (sc as PoolScreen).visible:
+			(sc as PoolScreen).leave()          # nothing half-finished is carried to the next screen
 	current = name
 	var is_hub: bool = name == "start" or name == "hub_pool" or name == "hub_summary"
 	hub.visible = is_hub
 	pool_screen.visible = name == "pool"
 	trial_screen.visible = name == "trial"
+	help_screen.visible = name == "help"
 	summary_screen.visible = name == "summary"
 	match name:
 		"start":
@@ -120,6 +170,9 @@ func show_screen(name: String) -> void:
 		"trial":
 			trial_screen.set_trial(TideTrial.new())      # a fresh attempt; the regular run stays suspended
 			trial_screen.enter()
+		"help":
+			help_screen.set_help(GameSession.new_tutorial_sandbox())
+			help_screen.enter()
 		"summary":
 			summary_screen.refresh()
 

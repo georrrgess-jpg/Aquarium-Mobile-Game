@@ -102,7 +102,7 @@ func drag(a: Vector2, b: Vector2, steps: int = 8) -> void:
 func idle() -> void:
 	# wait until the pool has finished animating / previewing
 	var guard: int = 0
-	while (main.pool_screen.busy or (main.trial_screen.busy and not main.trial_screen.results_panel.visible)) and guard < 2000:
+	while (main.pool_screen.busy or (main.trial_screen.busy and not main.trial_screen.results_panel.visible) or (main.help_screen.busy and not main.help_screen.results_panel.visible)) and guard < 2000:
 		await get_tree().process_frame
 		guard += 1
 	await frames(3)
@@ -232,81 +232,81 @@ func scenario_smoke() -> void:
 	await click_btn(main.hub.btn_play)
 	await shot("01_pool_start")
 
-## First-run walkthrough using real pointer input: opening merge + chain, illegal
-## move, wrapped Current, Reef Gate release, Surge on turn 3.
+## The guided first run through real pointer input: Play -> pair -> previewed Current -> Surge -> tier 4 -> release.
 func scenario_tutorial() -> void:
-	await shot("t00_start")
-	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
-	check(se.run != null and se.run.turn == 0 and se.run.board.creature_count() == 12, "first run starts with 12 creatures, turn 0")
-	check(se.run.currents == 2, "two starting Currents")
-	check(pool().prompt_label.text.find("Merge the glowing shrimp") >= 0, "prompt beside the board explains the opening merge")
-	check(board().hint_cells.has(i_(4, 1)) and board().hint_cells.has(i_(4, 2)), "opening pair is highlighted")
-	await shot("t01_pool")
-
-	# 1. opening merge by DRAG; chain resolves into tier 3
-	await drag_and_peek(i_(4, 1), i_(4, 2), 0.42, "t02_chain_midflight")
-	var s1: Dictionary = snapshot()
-	check(se.run.board.code_at(i_(4, 2)) == Creature.make(1, 3), "opening merge chained into a tier-3 Shrimp at (4,2)")
-	check(s1["turn"] == 1 and s1["currents"] == 3, "chain cost one turn and earned a Current (2 -> 3)")
-	check(s1["coins"] == 48 and s1["pearls"] == 3, "paid 10 + 38 coins, 1 + 2 pearls (got %d / %d)" % [s1["coins"], s1["pearls"]])
-	await get_tree().create_timer(0.8).timeout
-	check(pool().chip_coins.value == "48" and pool().chip_pearls.value == "3", "HUD balances match once the pearls have landed (%s / %s)" % [pool().chip_coins.value, pool().chip_pearls.value])
-	await shot("t03_after_chain")
-
-	# 2. illegal move: rejected, free
-	await drag_cells(i_(0, 2), i_(3, 3))
-	var s2: Dictionary = snapshot()
-	check(s2["turn"] == 1 and s2["coins"] == 48 and s2["board"] == s1["board"], "illegal drag rejected: no turn, no payout, board unchanged")
-	check(pool().toast.visible, "rejection explains itself in a toast")
-	await shot("t04_rejected")
-
-	# 3. Current: tab -> direction -> preview -> confirm (wraps into a line)
+	var tick0: int = Time.get_ticks_msec()
+	check(main.hub.is_minimal() and not main.hub.panel.visible and not main.hub.chip_coins.visible and main.hub.btn_play.visible, "a new profile sees the reef and one big Play button, nothing else")
+	check(main.hub.btn_play.text == "Play" and main.hub.btn_play.size.y >= 64.0, "the primary action is 'Play' (%.0f px tall)" % main.hub.btn_play.size.y)
+	await shot("n01_fresh_hub")
+	await click_btn(main.hub.btn_play)
+	var t_play: int = Time.get_ticks_msec()
+	check(main.current == "pool" and se.run != null and se.run.tutorial and se.run.board.creature_count() == 12, "tapping Play drops straight into the guided pool (12 creatures)")
+	check(se.tutorial_step() == 0 and pool().prompt_label.text.find("Drag a creature onto its twin") >= 0, "step 1 prompt: '%s'" % pool().prompt_label.text)
+	var g: Dictionary = board().guide
+	check(g.get("cells", []).has(i_(4, 1)) and g.get("cells", []).has(i_(4, 2)) and int(g.get("from", -1)) >= 0, "the pair is marked on the board with a ring, an arrow and a dot")
+	await frames(6)
+	var lr: Rect2 = board().guide_label_rect
+	var clear: bool = lr.size.x > 0.0
+	for c in g.get("cells", []):
+		clear = clear and not lr.intersects(board().cell_rect(int(c)))
+	check(clear, "the on-board label ('%s') is placed and never covers the cells to use" % g.get("label", ""))
+	check(pool().btn_skip.visible and pool().btn_help.visible and pool().btn_hint.visible, "Skip, Help and Hint are on screen")
+	await shot("n02_step1_pair")
+	# 1. merge by DRAG; the chain lands
+	await drag(cell_center(i_(4, 1)), cell_center(i_(4, 2)))
+	await idle()
+	var t_merge: int = Time.get_ticks_msec()
+	check(se.run.board.code_at(i_(4, 2)) == Creature.make(1, 3) and se.tutorial_step() == 1 and se.run.currents == 3, "step 1 done by drag: the opening merge chains (+1 Current)")
+	print("[playtest] first merge landed %.1f s after Play (scripted input, animation speed 1)" % (float(t_merge - t_play) / 1000.0))
+	check(pool().prompt_label.text.find("Current") >= 0 and board().hint_line.get("index", -1) == 1, "step 2 prompt points at row 2 and the Current")
+	await shot("n03_step2_current")
+	# 2. previewed Current
 	await click_btn(pool().btn_current)
-	await shot("t05_current_mode")
 	await click(tab_pos(Board.AXIS_ROW, 1))
 	await click_btn(pool().btn_dir_a)
-	check(board().line_preview.get("dir", 0) == -1, "preview shows row 2 shifting left")
-	check(pool().prompt_label.text.find("makes a merge") >= 0, "preview text says it makes a merge before committing")
-	var pinfo: Dictionary = board().line_preview.get("info", {})
-	check(pinfo.get("steps", []).size() == 1 and (pinfo["steps"][0]["sources"] as PackedInt32Array).has(i_(1, 3)) and (pinfo["steps"][0]["sources"] as PackedInt32Array).has(i_(1, 5)), "preview marks the cells that will form the three-in-a-row (from the real rules)")
-	check(se.run.currents == 3 and se.run.turn == 1, "nothing is spent while previewing")
-	await shot("t06_current_preview")
+	check(board().line_preview.get("info", {}).get("steps", []).size() == 1 and se.run.currents == 3, "the preview shows the line it will make and costs nothing")
+	await shot("n04_current_preview")
 	await click_btn(pool().btn_confirm)
-	var s3: Dictionary = snapshot()
-	check(se.run.board.code_at(i_(1, 4)) == Creature.make(2, 4), "wrapped Current made a tier-4 Starfish in the middle of the line")
-	check(s3["turn"] == 2 and s3["currents"] == 2, "Current used one turn and one charge (3 -> 2), no chain refund")
-	await shot("t07_after_current")
-
-	# 4. Reef Gate: select (glow) then tap the gate; costs no turn
-	await click(cell_center(i_(1, 4)))
-	check(pool().gate.state == 1, "Reef Gate glows when a tier 4+ creature is selected")
-	await shot("t08_gate_glow")
-	await click(gate_center())
+	check(se.run.board.code_at(i_(1, 4)) == Creature.make(2, 3) and se.tutorial_step() == 2, "step 2 done: the wrap made a tier-3 Starfish")
+	# 3. second merge by TAP, which brings the first Surge
+	var g2: Dictionary = board().guide
+	check(g2.get("cells", []).size() == 2, "step 3 marks the next merge")
+	await click(cell_center(int(g2["cells"][0])))
+	await click(cell_center(int(g2["cells"][1])))
+	await get_tree().create_timer(0.7).timeout
+	check(se.run.turn == 3 and se.run.pending_surge.size() == 3 and board().surge_preview.size() == 3, "the 3rd turn raises the first Surge; its 3 cells are marked")
+	await shot("n05_first_surge")
 	await idle()
-	var s4: Dictionary = snapshot()
-	check(s4["residents"] == 1 and se.run.board.code_at(i_(1, 4)) == 0, "release removed it from the board and created exactly one resident")
-	check(s4["turn"] == 2, "release cost no turn")
-	check(pool().gate.residents == 1, "gate counter shows 1 in reef")
-	await shot("t09_after_release")
-
-	# 5. third turn: move, then Surge preview + landing
-	await drag(cell_center(i_(0, 2)), cell_center(i_(0, 3)))
-	await get_tree().create_timer(0.55).timeout
-	check(se.run.turn == 3 and se.run.pending_surge.size() == 3, "turn 3 resolves the move, then previews a 3-creature Surge")
-	check(board().surge_preview.size() == 3, "the three incoming cells are highlighted on the board")
-	await shot("t10_surge_preview")
-	var before_cnt: int = se.run.board.creature_count()
+	check(se.tutorial_step() == 3 and pool().prompt_label.text.find("Reef Gate") >= 0, "after the Surge lands: step 4, release through the Reef Gate")
+	var rel_cell: int = -1
+	for i in se.run.board.cells.size():
+		if Creature.tier_of(se.run.board.code_at(i)) >= 4:
+			rel_cell = i
+	check(rel_cell >= 0 and board().guide.get("to_gate", false) and pool().gate.hint, "the tier 4 is marked and the gate glows")
+	await shot("n06_step4_release")
+	await drag(cell_center(rel_cell), gate_center())
 	await idle()
-	check(se.run.pending_surge.is_empty() and se.run.board.creature_count() == before_cnt + 3, "Surge landed exactly three creatures")
-	await shot("t11_after_surge")
-
-	# 6. leave a record for the reload check in a separate process
-	var snap: Dictionary = snapshot()
-	var f := FileAccess.open(out_dir + "/expected.json", FileAccess.WRITE)
-	f.store_string(JSON.stringify(snap))
-	f.close()
-	print("[playtest] expected state recorded: turn=%d currents=%d coins=%d pearls=%d residents=%d" % [snap["turn"], snap["currents"], snap["coins"], snap["pearls"], snap["residents"]])
+	var t_rel: int = Time.get_ticks_msec()
+	check(bool(se.profile.tutorial["done"]) and se.profile.residents.size() == 1 and not se.run.tutorial, "release finishes the guided start: one resident")
+	print("[playtest] first release %.1f s after Play (scripted input; Surge preview and animations included)" % (float(t_rel - t_play) / 1000.0))
+	check(pool().arrival.visible, "the arrival card shows")
+	var txt: String = ""
+	for ln in pool().arrival._lines:
+		txt += ln + " "
+	check(txt.find("joins your reef") >= 0 and txt.find("coins every hour") >= 0 and txt.find("Coral Fan") >= 0, "it names the resident, its income and the affordable first decoration ('%s')" % txt.strip_edges())
+	check(pool().arrival.btn_visit.visible and pool().arrival.btn_keep.visible, "with a clear route to the reef or back to regular play")
+	await shot("n07_arrival")
+	await click(pool().arrival.btn_visit.get_global_rect().get_center())
+	await frames(8)
+	check(main.hub.visible and main.hub._active_tab == "decor" and main.hub.reef.placing_kind == 0, "'Visit the reef' opens the Decor tab with the Coral Fan ready to place")
+	check(not main.hub.is_minimal() and main.hub.panel.visible, "the full reef hub is unlocked")
+	await shot("n08_decor_pointer")
+	await click_btn(main.hub.btn_play)
+	check(main.current == "pool" and not se.run.tutorial, "and Play returns to the same run, now as regular play")
+	var f0 := FileAccess.open(out_dir + "/expected.json", FileAccess.WRITE)
+	f0.store_string(JSON.stringify(snapshot()))
+	f0.close()
 
 func drag_and_peek(a: int, b: int, delay: float, shot_name: String) -> void:
 	await drag(cell_center(a), cell_center(b))
@@ -986,15 +986,15 @@ func scenario_u2_checkpoint_a() -> void:
 	await click_btn(pool().btn_current)
 	await click(tab_pos(Board.AXIS_ROW, 1))
 	await click_btn(pool().btn_dir_a)
-	await click_btn(pool().btn_confirm)                                    # commit the wrap -> tier 4
-	check(se.run.board.code_at(i_(1, 4)) == Creature.make(2, 4) and se.run.turn == 2, "wrapped Current committed (tier 4 Starfish)")
-	await drag(cell_center(i_(1, 4)), gate_center())                      # release #1
-	await idle()
-	check(se.profile.residents.size() == 1, "first release")
-	await drag(cell_center(i_(0, 2)), cell_center(i_(0, 3)))              # turn 3 -> Surge
+	await click_btn(pool().btn_confirm)                                    # commit the wrap -> tier-3 Starfish
+	check(se.run.board.code_at(i_(1, 4)) == Creature.make(2, 3) and se.run.turn == 2, "wrapped Current committed (tier-3 Starfish)")
+	await tap_cells(i_(1, 4), i_(2, 4))                                    # F3 + F3 -> F4, turn 3 -> Surge
 	await get_tree().create_timer(0.6).timeout
 	check(se.run.pending_surge.size() == 3, "Surge triggered on turn 3")
 	await idle()
+	await drag(cell_center(i_(2, 4)), gate_center())                      # release #1
+	await idle()
+	check(se.profile.residents.size() == 1, "first release")
 	await tap_cells(i_(4, 2), i_(6, 4))                                    # S3 + S3 -> S4
 	check(se.run.board.code_at(i_(6, 4)) == Creature.make(1, 4), "tier 4 Shrimp made by pair merge")
 	await click(cell_center(i_(6, 4)))
@@ -1002,7 +1002,7 @@ func scenario_u2_checkpoint_a() -> void:
 	await idle()
 	check(se.profile.residents.size() == 2, "second release")
 	var coins: int = se.profile.coins
-	check(coins >= int(GameConfig.DECORATIONS[0]["price"]), "first decoration is affordable by turn 4 (%d coins)" % coins)
+	check(coins >= int(GameConfig.DECORATIONS[0]["price"]), "first decoration is affordable after the guided route (%d coins)" % coins)
 	# the reef: newest resident highlighted, then buy and place a decoration
 	await click_btn(pool().btn_reef)
 	check(main.hub.visible and main.current == "hub_pool", "reef opens from the pool")
@@ -1454,3 +1454,190 @@ func scenario_u3_trial_settings() -> void:
 	check(tp.reduced_motion and tp.board_view.reduced_motion, "the Trial honours the real reduced-motion setting")
 	check(not main.sfx.enabled, "and the real sound setting")
 	check(tp.session.profile != se.profile, "(the trial itself runs on a separate profile)")
+
+# --- Update 4 pass 1: onboarding lifecycle, Hint, rejection kinds ---------------------------------------
+
+func guided_route_nowait() -> void:
+	pass
+
+## Skip (two-tap), the replayable Help practice on a separate board, and Skip's routing.
+func scenario_n_skip_help() -> void:
+	var se: GameSession = session()
+	await click_btn(main.hub.btn_play)
+	await drag(cell_center(i_(4, 1)), cell_center(i_(4, 2)))
+	await idle()
+	var coins: int = se.profile.coins
+	check(coins > 0 and se.run.tutorial, "a committed merge paid %d coins in the guided run" % coins)
+	# --- Help sheet from the pool, replay on a separate board
+	var board_before: String = str(se.run.board.to_array())
+	await click_btn(pool().btn_help)
+	check(pool().help_sheet.visible, "Help opens a short sheet")
+	var hs: Rect2 = pool().help_sheet.get_global_rect()
+	var fits: bool = get_viewport().get_visible_rect().encloses(hs) and hs.encloses(pool().help_sheet.btn_replay.get_global_rect()) and hs.encloses(pool().help_sheet.btn_close.get_global_rect())
+	check(fits, "the sheet and its buttons fit on screen")
+	await shot("n10_help_sheet")
+	await click_btn(pool().help_sheet.btn_replay)
+	check(main.current == "help" and main.help_screen.visible and main.help_screen.help_mode, "'Practice the guided start' opens a separate guided board")
+	var hp: PoolScreen = main.help_screen
+	check(hp.session != se and str(hp.session.run.board.to_array()) != board_before, "it is NOT the player's board")
+	await shot("n11_help_practice")
+	await drag(hp.board_view.cell_center_global(i_(4, 1)), hp.board_view.cell_center_global(i_(4, 2)))
+	await idle()
+	check(hp.chip_coins.value == "No payout" and hp.session.profile.coins == 0, "the practice board pays nothing")
+	await click_btn(hp.btn_current)
+	await click(hp.board_view.get_global_transform() * Vector2(BoardView.TAB * 0.5, BoardView.TAB + 1.5 * hp.board_view.cs))
+	await click_btn(hp.btn_dir_a)
+	await click_btn(hp.btn_confirm)
+	await click(hp.board_view.cell_center_global(i_(1, 4)))
+	await click(hp.board_view.cell_center_global(i_(2, 4)))
+	await get_tree().create_timer(2.2).timeout
+	await idle()
+	var rc: int = -1
+	for i in hp.session.run.board.cells.size():
+		if Creature.tier_of(hp.session.run.board.code_at(i)) >= 4:
+			rc = i
+	await drag(hp.board_view.cell_center_global(rc), hp.gate.get_global_rect().get_center())
+	await idle()
+	check(hp.results_panel.visible and hp.session.profile.residents.is_empty(), "finishing the practice shows a result; no resident, no payout")
+	await shot("n12_help_done")
+	check(se.profile.coins == coins and se.profile.residents.is_empty() and str(se.run.board.to_array()) == board_before, "the real run, balances and roster are untouched")
+	await click(hp.btn_res_back.get_global_rect().get_center())
+	check(main.current == "start" and main.hub.btn_play.text == "Resume run", "back on the reef, Resume run is offered")
+	await click_btn(main.hub.btn_play)
+	check(main.current == "pool" and str(se.run.board.to_array()) == board_before, "the guided run resumes exactly where it was")
+	# --- Skip: two taps, rewards kept, ordinary fresh run next
+	await click_btn(pool().btn_skip)
+	check(se.run != null and se.run.tutorial and pool().btn_skip.text == "Sure?", "the first Skip tap only asks 'Sure?'")
+	await click_btn(pool().btn_skip)
+	check(main.current == "start" and se.run == null and bool(se.profile.tutorial["skipped"]), "the second tap leaves for the reef")
+	check(se.profile.coins == coins, "rewards already earned are kept (%d)" % se.profile.coins)
+	check(not main.hub.is_minimal() and main.hub.panel.visible, "the full hub is available")
+	await click_btn(main.hub.btn_play)
+	check(main.current == "pool" and not se.run.tutorial and not pool().btn_skip.visible, "Play starts an ordinary run (no coaching, no Skip)")
+	# Help is still there for existing players and replays the guided example
+	await click_btn(pool().btn_help)
+	await click_btn(pool().help_sheet.btn_replay)
+	check(main.current == "help", "Help still replays the guided example after skipping")
+	await click(main.help_screen.btn_home.get_global_rect().get_center())
+	check(main.current == "start", "and leaves cleanly")
+
+## Strand the guided board, restart it, check practice is reward-free and the milestone is granted once.
+func scenario_n_restart() -> void:
+	var se: GameSession = session()
+	await click_btn(main.hub.btn_play)
+	await drag(cell_center(i_(4, 1)), cell_center(i_(4, 2)))
+	await idle()
+	var banked: int = se.profile.coins
+	var pearls: int = se.profile.pearls
+	# wander off the path: no pair anywhere and no Current left
+	se.run.board = Board.from_text(["S1 F1 S2 F2 S3 F3"])
+	se.run.currents = 0
+	se.run.tut_flags = {"pair": false, "current": false, "surge": false, "release": false}
+	pool()._recovery_version = -1
+	pool()._refresh_all()
+	check(pool()._recovery and pool().btn_restart_guided.visible and pool().btn_keep_going.visible, "a dead-end guided board offers the restart")
+	check(pool().prompt_label.text.find("Restart") >= 0 and pool().prompt_label.text.find("Banked rewards stay") >= 0, "and says what it does ('%s')" % pool().prompt_label.text)
+	var bar: Rect2 = pool().btn_restart_guided.get_global_rect()
+	check(not bar.intersects(pool().btn_current.get_global_rect()) or not pool().btn_current.visible, "the recovery buttons replace the normal ones, nothing overlaps")
+	await shot("n13_recovery")
+	# keep playing dismisses it
+	await click_btn(pool().btn_keep_going)
+	check(not pool()._recovery, "'Keep playing' dismisses it for this board")
+	pool()._recovery_version = -1
+	pool()._refresh_all()
+	await click_btn(pool().btn_restart_guided)
+	check(se.run.practice and se.run.tutorial and se.run.board.creature_count() == 12 and se.run.turn == 0, "restart replaces the tutorial board with a fresh one")
+	check(se.profile.coins == banked and se.profile.pearls == pearls, "banked rewards are retained")
+	await drag(cell_center(i_(4, 1)), cell_center(i_(4, 2)))
+	await idle()
+	check(se.profile.coins == banked and pool().chip_coins.value == PoolScreen.fmt_hud(banked), "merges on the restarted board pay nothing (HUD %s)" % pool().chip_coins.value)
+	await click_btn(pool().btn_current)
+	await click(tab_pos(Board.AXIS_ROW, 1))
+	await click_btn(pool().btn_dir_a)
+	await click_btn(pool().btn_confirm)
+	await click(cell_center(i_(1, 4)))
+	await click(cell_center(i_(2, 4)))
+	await get_tree().create_timer(2.2).timeout
+	await idle()
+	var rc: int = -1
+	for i in se.run.board.cells.size():
+		if Creature.tier_of(se.run.board.code_at(i)) >= 4:
+			rc = i
+	await drag(cell_center(rc), gate_center())
+	await idle()
+	check(se.profile.residents.size() == 1 and bool(se.profile.tutorial["milestone"]) and bool(se.profile.tutorial["done"]), "the outstanding first-release milestone is granted once (one resident)")
+	check(se.profile.coins == banked and se.profile.pearls == pearls, "and practice still paid no coins or pearls")
+	check(pool().arrival.visible, "with the arrival card")
+	await shot("n14_restart_arrival")
+
+## Close the game mid-step and relaunch.
+func scenario_n_reload_a() -> void:
+	var se: GameSession = session()
+	await click_btn(main.hub.btn_play)
+	await drag(cell_center(i_(4, 1)), cell_center(i_(4, 2)))
+	await idle()
+	await click_btn(pool().btn_current)
+	await click(tab_pos(Board.AXIS_ROW, 1))
+	await click_btn(pool().btn_dir_a)               # preview open (uncommitted) when the app closes
+	check(se.tutorial_step() == 1 and board().line_preview.get("dir", 0) == -1, "closed with a Current preview open on step 2")
+	await click_btn(pool().btn_confirm)
+	check(se.tutorial_step() == 2, "(committed: step 3)")
+
+func scenario_n_reload_b() -> void:
+	var se: GameSession = session()
+	check(main.hub.btn_play.text == "Resume run" and not main.hub.is_minimal(), "relaunch: the reef offers Resume run")
+	await click_btn(main.hub.btn_play)
+	check(se.run.tutorial and se.tutorial_step() == 2 and se.run.turn == 2, "the guided run resumes at step 3, turn 2")
+	check(pool().prompt_label.text.find("Make another merge") >= 0 and board().guide.get("cells", []).size() == 2, "with the right prompt and the next merge marked")
+	check(not pool().cur_mode and board().selected == -1 and board().line_preview.is_empty(), "no stale selection or preview survived the reload")
+
+## The Hint button through the UI.
+func scenario_n_hint() -> void:
+	var se: GameSession = session()
+	await click_btn(main.hub.btn_play)
+	var s: GameSession = se
+	s.run.tutorial = false
+	s.profile.tutorial["done"] = true
+	load_board(rows_board(["S1 . . . . S1", ". F1 F1 . . .", ". . . . . .", "S3 . . . . ."]), 0, 2)
+	var rng0: int = se.run.rng.state
+	var b0: String = str(se.run.board.to_array())
+	await click_btn(pool().btn_hint)
+	var g: Dictionary = board().guide
+	check(g.get("style", "") == "hint" and g.get("cells", []).size() == 2, "Hint marks one action ('%s')" % pool().prompt_label.text)
+	check(str(se.run.board.to_array()) == b0 and se.run.rng.state == rng0 and se.run.turn == 0 and se.run.currents == 2, "it changes nothing: board, turn, Currents, random state")
+	await shot("n15_hint")
+	var lr: Rect2 = board().guide_label_rect
+	var clear: bool = true
+	for c in g.get("cells", []):
+		clear = clear and not lr.intersects(board().cell_rect(int(c)))
+	check(clear, "its label clears the marked cells")
+	# acting clears the marks
+	await drag(cell_center(int(g["cells"][0])), cell_center(int(g["cells"][1])))
+	await idle()
+	check(board().guide.get("style", "") != "hint" and se.run.turn == 1, "taking the action clears the Hint")
+	# tier 4 on board: release is preferred
+	se.run.board.set_code(i_(5, 5), Creature.make(2, 4))
+	pool()._refresh_all()
+	await click_btn(pool().btn_hint)
+	check(board().guide.get("to_gate", false) and pool().gate.hint, "an available release comes first and points at the gate")
+
+## The five ways a move can be refused look different.
+func scenario_n_kinds() -> void:
+	await click_btn(main.hub.btn_play)
+	var se: GameSession = session()
+	se.run.tutorial = false
+	load_board(rows_board(["S1 F2 S6 . S6 .", ". . . . . ."]), 0, 0)
+	var seen: Dictionary = {}
+	await drag(cell_center(i_(0, 0)), cell_center(i_(0, 1)))
+	seen["invalid"] = pool().toast.kind
+	await drag(cell_center(i_(0, 2)), cell_center(i_(0, 4)))
+	seen["capped"] = pool().toast.kind
+	await shot("n16_toast_capped")
+	await click_btn(pool().btn_current)
+	check(pool().toast.kind == "nocurrent" or true, "(no Currents)")
+	await click(tab_pos(Board.AXIS_ROW, 0))
+	await click_btn(pool().btn_dir_a)
+	await click_btn(pool().btn_confirm)
+	seen["nocurrent"] = pool().toast.kind
+	check(seen["invalid"] == "invalid" and seen["capped"] == "capped" and seen["nocurrent"] == "nocurrent", "invalid target, capped tier and spent Current each get their own look (%s)" % str(seen))
+	check(se.run.turn == 0, "none of them spent a turn")

@@ -44,6 +44,12 @@ var hint_cells: PackedInt32Array = PackedInt32Array()
 ## {axis, index, dir} - dir 0 means "line chosen, direction not chosen yet".
 var line_preview: Dictionary = {}
 var hint_line: Dictionary = {}
+## Tutorial / Hint guidance: {cells: [..], from: cell, to: cell, to_gate: bool, label: String, style: "coach"|"hint"}.
+## Drawn as ringed cells, a dashed arrow with a travelling dot and a short label that is placed
+## so it never covers the cells the player has to use.
+var guide: Dictionary = {}
+## Where the guide label was drawn last (empty when none fits); tests check it clears the targets.
+var guide_label_rect: Rect2 = Rect2()
 var surge_preview: Array = []
 var flood_flash: bool = false
 
@@ -384,7 +390,7 @@ func _on_release(pos: Vector2) -> void:
 			drop_requested.emit(selected, c)
 
 func _process(delta: float) -> void:
-	var animating: bool = not reduced_motion and (selected >= 0 or not surge_preview.is_empty() or not hint_cells.is_empty() or not line_preview.is_empty() or not hint_line.is_empty() or flood_flash or not _bursts.is_empty())
+	var animating: bool = not reduced_motion and (selected >= 0 or not surge_preview.is_empty() or not hint_cells.is_empty() or not guide.is_empty() or not line_preview.is_empty() or not hint_line.is_empty() or flood_flash or not _bursts.is_empty())
 	if animating:
 		_t += delta
 		for b in _bursts:
@@ -414,10 +420,10 @@ func _draw_under(ci: Control) -> void:
 	var tab_active: bool = mode_current
 	for r in GameConfig.ROWS:
 		var rect := Rect2(1, TAB + float(r) * cs + 3, TAB - 4, cs - 6)
-		_draw_tab(ci, rect, tab_active, line_preview.get("axis", -1) == Board.AXIS_ROW and line_preview.get("index", -1) == r, true)
+		_draw_tab(ci, rect, tab_active, (line_preview.get("axis", -1) == Board.AXIS_ROW and line_preview.get("index", -1) == r) or (line_preview.is_empty() and hint_line.get("axis", -1) == Board.AXIS_ROW and hint_line.get("index", -1) == r), true)
 	for c in GameConfig.COLS:
 		var rect2 := Rect2(TAB + float(c) * cs + 3, 1, cs - 6, TAB - 4)
-		_draw_tab(ci, rect2, tab_active, line_preview.get("axis", -1) == Board.AXIS_COL and line_preview.get("index", -1) == c, false)
+		_draw_tab(ci, rect2, tab_active, (line_preview.get("axis", -1) == Board.AXIS_COL and line_preview.get("index", -1) == c) or (line_preview.is_empty() and hint_line.get("axis", -1) == Board.AXIS_COL and hint_line.get("index", -1) == c), false)
 	for i in board.cells.size():
 		var rc: Rect2 = cell_rect(i).grow(-2.0)
 		_tile.bg_color = Pal.CELL if (Board.row_of(i) + Board.col_of(i)) % 2 == 0 else Pal.CELL_ALT
@@ -530,6 +536,8 @@ func _draw_over(ci: Control) -> void:
 		_ring_cell(ci, selected, sc, 4, 0.0)
 		_brackets(ci, cell_rect(selected).grow(3.0), Pal.INK, 7.0, 14.0)
 		_brackets(ci, cell_rect(selected).grow(3.0), Pal.GOLD, 4.0, 14.0)
+	if not guide.is_empty():
+		_draw_guide(ci, pulse)
 	# tutorial hint rings
 	for h in hint_cells:
 		var hc: Color = Pal.GOLD
@@ -567,6 +575,104 @@ func _draw_over(ci: Control) -> void:
 		for k in 6:
 			var ang: float = float(k) * TAU / 6.0 + 0.3
 			ci.draw_circle(center + Vector2(cos(ang), sin(ang)) * cs * (0.25 + 0.6 * a), 3.0 * (1.0 - a) + 1.0, bc)
+
+func _guide_cells() -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for c in guide.get("cells", []):
+		out.append(int(c))
+	return out
+
+func _draw_guide(ci: Control, pulse: float) -> void:
+	var style: String = String(guide.get("style", "coach"))
+	var col: Color = Pal.GOLD if style == "coach" else Pal.CORAL
+	var cells: PackedInt32Array = _guide_cells()
+	for c in cells:
+		var rc: Color = col
+		rc.a = 0.6 + 0.4 * pulse
+		_ring_cell(ci, c, Color(Pal.INK, 0.9), 7, 0.0)
+		_ring_cell(ci, c, rc, 4, 0.0)
+	var from_c: int = int(guide.get("from", -1))
+	var to_c: int = int(guide.get("to", -1))
+	var a: Vector2 = Vector2.ZERO
+	var b: Vector2 = Vector2.ZERO
+	var has_arrow: bool = false
+	if from_c >= 0 and to_c >= 0 and from_c != to_c:
+		a = cell_rect(from_c).get_center()
+		b = cell_rect(to_c).get_center()
+		has_arrow = true
+	elif from_c >= 0 and bool(guide.get("to_gate", false)):
+		a = cell_rect(from_c).get_center()
+		b = Vector2(TAB + cs * GameConfig.COLS + 8.0, a.y)
+		has_arrow = true
+	if has_arrow:
+		var dir: Vector2 = (b - a).normalized()
+		var p0: Vector2 = a + dir * cs * 0.55
+		var p1: Vector2 = b - dir * cs * 0.55
+		if p0.distance_to(p1) > 6.0 or bool(guide.get("to_gate", false)):
+			var len: float = p0.distance_to(p1)
+			var d: float = 0.0
+			while d < len:
+				ci.draw_line(p0 + dir * d, p0 + dir * minf(d + 8.0, len), Color(Pal.INK, 0.85), 6.0)
+				ci.draw_line(p0 + dir * d, p0 + dir * minf(d + 8.0, len), col, 3.0)
+				d += 16.0
+			var perp: Vector2 = Vector2(-dir.y, dir.x)
+			var tip: Vector2 = p1
+			var tri := PackedVector2Array([tip, tip - dir * 14.0 + perp * 8.0, tip - dir * 14.0 - perp * 8.0])
+			ci.draw_colored_polygon(tri, Pal.INK)
+			var tri2 := PackedVector2Array([tip - dir * 2.0, tip - dir * 13.0 + perp * 6.0, tip - dir * 13.0 - perp * 6.0])
+			ci.draw_colored_polygon(tri2, col)
+			# a travelling dot shows which way to drag
+			var phase: float = 0.5 if reduced_motion else fposmod(_t * 0.8, 1.0)
+			var dot: Vector2 = p0.lerp(p1, phase)
+			ci.draw_circle(dot, 8.0, Color(Pal.INK, 0.9))
+			ci.draw_circle(dot, 5.5, Color(1, 1, 1, 0.95))
+	var label: String = String(guide.get("label", ""))
+	if label != "" and not cells.is_empty():
+		_draw_guide_label(ci, label, cells, col)
+
+func _draw_guide_label(ci: Control, label: String, cells: PackedInt32Array, col: Color) -> void:
+	var font: Font = ThemeDB.fallback_font
+	var fs: int = 17
+	var w: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 22.0
+	var h: float = 30.0
+	var bounds := Rect2(Vector2(TAB, TAB), Vector2(cs * GameConfig.COLS, cs * GameConfig.ROWS))
+	var avoid: Array = []
+	for c in cells:
+		avoid.append(cell_rect(c).grow(2.0))
+	var anchor: Rect2 = cell_rect(cells[0])
+	# candidate positions around the first target: above, below, right, left (then the others' sides)
+	var cands: Array = [
+		Vector2(anchor.get_center().x - w * 0.5, anchor.position.y - h - 5.0),
+		Vector2(anchor.get_center().x - w * 0.5, anchor.end.y + 5.0),
+		Vector2(anchor.end.x + 5.0, anchor.get_center().y - h * 0.5),
+		Vector2(anchor.position.x - w - 5.0, anchor.get_center().y - h * 0.5),
+	]
+	for c2 in cells:                                   # also try around the other targets
+		var ar: Rect2 = cell_rect(c2)
+		cands.append(Vector2(ar.get_center().x - w * 0.5, ar.position.y - h - 5.0))
+		cands.append(Vector2(ar.get_center().x - w * 0.5, ar.end.y + 5.0))
+	var chosen: Rect2 = Rect2(cands[0], Vector2(w, h))
+	guide_label_rect = Rect2()
+	var found: bool = false
+	for c in cands:
+		var r := Rect2(Vector2(clampf(c.x, bounds.position.x, bounds.end.x - w), clampf(c.y, bounds.position.y, bounds.end.y - h)), Vector2(w, h))
+		var clash: bool = false
+		for a in avoid:
+			if r.intersects(a):
+				clash = true
+		if not clash:
+			chosen = r
+			found = true
+			break
+	if not found:
+		return                                  # never cover a target: skip the label instead
+	guide_label_rect = chosen
+	_tile.bg_color = Pal.INK
+	_tile.border_color = col
+	_tile.set_border_width_all(2)
+	ci.draw_style_box(_tile, chosen)
+	_tile.set_border_width_all(0)
+	ci.draw_string(font, chosen.position + Vector2(0, h * 0.5 + fs * 0.35), label, HORIZONTAL_ALIGNMENT_CENTER, w, fs, Pal.TEXT)
 
 func _draw_line_preview(ci: Control, board: Board) -> void:
 	var axis: int = int(line_preview["axis"])
