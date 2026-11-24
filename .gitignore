@@ -1,0 +1,4 @@
+.godot/
+*.import
+/dev/out/
+/export/
