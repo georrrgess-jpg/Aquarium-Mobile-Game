@@ -24,7 +24,11 @@ var cs: float = 66.0:
 	set(v):
 		cs = v
 		_relayout()
-var interactive: bool = true
+var interactive: bool = true:
+	set(v):
+		interactive = v
+		if not v:
+			cancel_gesture()
 var mode_current: bool = false:
 	set(v):
 		mode_current = v
@@ -49,6 +53,7 @@ var _over: Layer
 var _fx: Control
 var _nodes: Dictionary = {}
 var _t: float = 0.0
+var _since_redraw: float = 0.0
 var _pressing: bool = false
 var _dragging: bool = false
 var _press_pos: Vector2 = Vector2.ZERO
@@ -162,10 +167,33 @@ func _tab_at(p: Vector2) -> Dictionary:
 
 # --- State ---------------------------------------------------------------------------
 
+## Drop any half-finished pointer gesture: stops a drag, clears press state and restores
+## the dimmed source piece. Called when input is locked, the pointer leaves the window,
+## focus is lost, the view is hidden, or the player cancels (Esc / right click).
+func cancel_gesture() -> void:
+	var was_dragging: bool = _dragging
+	_pressing = false
+	_dragging = false
+	_press_cell = -1
+	_press_is_target = false
+	_line_drag_cell = -1
+	_restore_drag_node()
+	if was_dragging:
+		_update_gate_state(false)
+		_over.queue_redraw()
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_MOUSE_EXIT or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		cancel_gesture()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree():
+		cancel_gesture()
+
 func select(cell: int) -> void:
 	selected = cell
-	if sfx != null and cell >= 0:
-		sfx.play("select")
+	if cell >= 0:
+		Haptics.tick()
+		if sfx != null:
+			sfx.play("select")
 	_update_gate_state()
 	selection_changed.emit(cell)
 	_over.queue_redraw()
@@ -252,6 +280,11 @@ func _gui_input(event: InputEvent) -> void:
 	if not interactive:
 		return
 	var mb := event as InputEventMouseButton
+	if mb != null and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+		cancel_gesture()
+		clear_selection()
+		accept_event()
+		return
 	if mb != null and mb.button_index == MOUSE_BUTTON_LEFT:
 		if mb.pressed:
 			_on_press(mb.position)
@@ -357,7 +390,10 @@ func _process(delta: float) -> void:
 		for b in _bursts:
 			b["age"] = float(b["age"]) + delta
 		_bursts = _bursts.filter(func(b: Dictionary) -> bool: return float(b["age"]) < 0.45)
-		_over.queue_redraw()
+		_since_redraw += delta
+		if _since_redraw >= 1.0 / 30.0:      # pulses are gentle; 30 fps redraw is plenty
+			_since_redraw = 0.0
+			_over.queue_redraw()
 	elif not _bursts.is_empty():
 		_bursts.clear()
 
@@ -439,29 +475,61 @@ func _ring_cell(ci: Control, cell: int, col: Color, width: int, grow: float = -1
 	_ring.set_border_width_all(width)
 	ci.draw_style_box(_ring, cell_rect(cell).grow(grow))
 
+func _brackets(ci: Control, r: Rect2, col: Color, width: float, arm: float) -> void:
+	# four corner brackets: a shape cue for "this piece is selected"
+	var pts: Array = [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]
+	var dirs: Array = [Vector2(1, 1), Vector2(-1, 1), Vector2(-1, -1), Vector2(1, -1)]
+	for i in 4:
+		var c: Vector2 = pts[i]
+		var d: Vector2 = dirs[i]
+		ci.draw_line(c, c + Vector2(d.x * arm, 0), col, width)
+		ci.draw_line(c, c + Vector2(0, d.y * arm), col, width)
+
+func _dashed(ci: Control, r: Rect2, col: Color, width: float) -> void:
+	var dash: float = 9.0
+	var corners: Array = [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]
+	for i in 4:
+		var a: Vector2 = corners[i]
+		var b: Vector2 = corners[(i + 1) % 4]
+		var len: float = a.distance_to(b)
+		var dir: Vector2 = (b - a) / maxf(len, 0.001)
+		var d: float = 0.0
+		while d < len:
+			ci.draw_line(a + dir * d, a + dir * minf(d + dash, len), col, width)
+			d += dash * 2.0
+
 func _draw_over(ci: Control) -> void:
 	var board: Board = session.run.board
 	var pulse: float = 0.0 if reduced_motion else 0.5 + 0.5 * sin(_t * 5.0)
-	# valid targets
+	# legal targets: merge = solid ring + diamond mark, slide = dotted circle + arrow dot
 	if selected >= 0 and not mode_current:
 		var t: Dictionary = _targets()
 		for i in t["merge"]:
-			var c: Color = Pal.TEAL
-			c.a = 0.35
+			var rc0: Rect2 = cell_rect(int(i))
+			var c: Color = Pal.TARGET
+			c.a = 0.28
 			_tile.bg_color = c
 			_tile.set_border_width_all(0)
-			ci.draw_style_box(_tile, cell_rect(int(i)).grow(-2.0))
-			_ring_cell(ci, int(i), Pal.TEAL, 4)
+			ci.draw_style_box(_tile, rc0.grow(-2.0))
+			_ring_cell(ci, int(i), Pal.TARGET, 4)
+			var m: Vector2 = rc0.position + Vector2(rc0.size.x - 13.0, 13.0)
+			ci.draw_colored_polygon(PackedVector2Array([m + Vector2(0, -9), m + Vector2(9, 0), m + Vector2(0, 9), m + Vector2(-9, 0)]), Pal.INK)
+			ci.draw_colored_polygon(PackedVector2Array([m + Vector2(0, -6.5), m + Vector2(6.5, 0), m + Vector2(0, 6.5), m + Vector2(-6.5, 0)]), Pal.TARGET)
 		for i in t["move"]:
 			var rc: Rect2 = cell_rect(int(i))
-			var dc: Color = Pal.TEAL
-			dc.a = 0.28
+			var dc: Color = Pal.TARGET
+			dc.a = 0.30
 			ci.draw_circle(rc.get_center(), cs * 0.22, dc)
-			dc.a = 0.9
-			ci.draw_arc(rc.get_center(), cs * 0.22, 0.0, TAU, 28, dc, 3.0, true)
+			dc.a = 1.0
+			var steps: int = 10
+			for k in steps:
+				var a0: float = TAU * float(k) / float(steps)
+				ci.draw_arc(rc.get_center(), cs * 0.22, a0, a0 + TAU / float(steps) * 0.55, 5, dc, 3.0, true)
 		var sc: Color = Pal.GOLD
-		sc.a = 0.75 + 0.25 * pulse
-		_ring_cell(ci, selected, sc, 5, 0.0)
+		sc.a = 0.8 + 0.2 * pulse
+		_ring_cell(ci, selected, sc, 4, 0.0)
+		_brackets(ci, cell_rect(selected).grow(3.0), Pal.INK, 7.0, 14.0)
+		_brackets(ci, cell_rect(selected).grow(3.0), Pal.GOLD, 4.0, 14.0)
 	# tutorial hint rings
 	for h in hint_cells:
 		var hc: Color = Pal.GOLD
@@ -470,7 +538,7 @@ func _draw_over(ci: Control) -> void:
 	# Current preview
 	if not line_preview.is_empty() and int(line_preview.get("dir", 0)) != 0:
 		_draw_line_preview(ci, board)
-	# Surge preview
+	# Surge preview: dashed outline + down-arrow tab + ghost creature (shapes as well as colour)
 	for p in surge_preview:
 		var cell: int = int(p["cell"])
 		var rc2: Rect2 = cell_rect(cell)
@@ -479,15 +547,14 @@ func _draw_over(ci: Control) -> void:
 		_tile.bg_color = f
 		_tile.set_border_width_all(0)
 		ci.draw_style_box(_tile, rc2.grow(-2.0))
-		var ghost: Dictionary = {"alpha": 0.78, "glow": false}
-		CreatureArt.draw_creature(ci, int(p["code"]), rc2.get_center(), cs, ghost)
-		var rc: Color = Pal.SURGE
-		rc.a = 0.7 + 0.3 * pulse
-		_ring_cell(ci, cell, rc, 4, -1.0)
-		# little wave arrow above ghost
-		var m: Vector2 = rc2.get_center() + Vector2(-cs * 0.32, -cs * 0.34)
-		ci.draw_colored_polygon(PackedVector2Array([m + Vector2(-6, -4), m + Vector2(6, -4), m + Vector2(0, 6)]), rc)
-	# drag ghost
+		CreatureArt.draw_creature(ci, int(p["code"]), rc2.get_center(), cs, {"alpha": 0.78, "glow": false})
+		var rcol: Color = Pal.SURGE
+		rcol.a = 0.75 + 0.25 * pulse
+		_dashed(ci, rc2.grow(-3.0), rcol, 4.0)
+		var m2: Vector2 = rc2.position + Vector2(13.0, 12.0)
+		ci.draw_colored_polygon(PackedVector2Array([m2 + Vector2(-9, -7), m2 + Vector2(9, -7), m2 + Vector2(0, 8)]), Pal.INK)
+		ci.draw_colored_polygon(PackedVector2Array([m2 + Vector2(-6.5, -5), m2 + Vector2(6.5, -5), m2 + Vector2(0, 5.5)]), rcol)
+	# drag ghost follows the pointer
 	if _dragging and selected >= 0 and session.run.board.code_at(selected) != 0:
 		CreatureArt.draw_creature(ci, session.run.board.code_at(selected), _drag_pos, cs * 1.15, {"alpha": 0.92})
 	# bursts
@@ -518,6 +585,16 @@ func _draw_line_preview(ci: Control, board: Board) -> void:
 		var c2: Color = col
 		c2.a = 0.85 * (1.0 - absf(phase - 0.5) * 1.2)
 		ci.draw_colored_polygon(PackedVector2Array([cen + dvec * s * 1.4, cen - dvec * s + perp * s * 1.2, cen - dvec * s - perp * s * 1.2]), c2)
+	# where the shift sets up an immediate merge (from the real Current rules): bracket every
+	# piece that will merge and mark the result cell
+	var info: Dictionary = line_preview.get("info", {})
+	for st in info.get("steps", []):
+		for sc in st["sources"]:
+			_brackets(ci, cell_rect(int(sc)).grow(1.0), Pal.INK, 7.0, 13.0)
+			_brackets(ci, cell_rect(int(sc)).grow(1.0), Pal.GOLD, 4.0, 13.0)
+		var rcell: Rect2 = cell_rect(int(st["result_cell"]))
+		ci.draw_circle(rcell.get_center(), cs * 0.13, Pal.INK)
+		ci.draw_circle(rcell.get_center(), cs * 0.09, Pal.GOLD)
 	# ghosts at the destination and wrap markers
 	for i in cells:
 		var code: int = board.code_at(i)
@@ -591,6 +668,7 @@ func float_text(cell: int, text: String, col: Color, size_px: int = 22) -> void:
 	tw.chain().tween_callback(lbl.queue_free)
 
 func shake(cell: int) -> void:
+	Haptics.reject()
 	if sfx != null:
 		sfx.play("reject")
 	if not _nodes.has(cell):
@@ -642,6 +720,7 @@ func _emit_reward(ev: Dictionary) -> void:
 	reward_popped.emit(cell_center_global(cell), int(ev.get("coins", 0)), int(ev.get("pearls", 0)), int(ev.get("step", 0)), int(ev.get("tier", 0)))
 	if int(ev.get("step", 0)) >= 1:
 		chain_cue.emit(int(ev["step"]), cell_center_global(cell))
+	Haptics.merge(int(ev.get("step", 0)))
 	if sfx != null:
 		sfx.pop(int(ev.get("step", 0)))
 	_burst(cell, Pal.tier_color(int(ev.get("tier", 1))))
@@ -732,6 +811,7 @@ func _ev_release(ev: Dictionary) -> void:
 	var cell: int = int(ev["cell"])
 	var code: int = int(ev["code"])
 	_drop_node(cell)
+	Haptics.release()
 	if sfx != null:
 		sfx.play("release")
 	# fly a copy through the gate (outside the clipped creature layer)

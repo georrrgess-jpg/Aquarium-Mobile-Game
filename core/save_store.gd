@@ -52,8 +52,27 @@ static func migrate(doc: Dictionary) -> Dictionary:
 	var v: int = int(doc.get("version", 0))
 	if v < 1 or v > GameConfig.SAVE_VERSION:
 		return {}
-	# if v == 1: doc = _v1_to_v2(doc)   # future formats chain here
+	if v == 1:
+		doc = _v1_to_v2(doc)
 	return doc
+
+## Update 1 -> Update 2: reef income fields appear. The income clock starts at the
+## moment of upgrade (no retroactive windfall); everything else is carried over untouched.
+static func _v1_to_v2(doc: Dictionary) -> Dictionary:
+	var out: Dictionary = doc.duplicate(true)
+	var prof: Dictionary = out.get("profile", {})
+	prof["decorations"] = prof.get("decorations", [])
+	prof["income_stamp"] = prof.get("income_stamp", GameClock.now())
+	prof["income_frac"] = prof.get("income_frac", 0.0)
+	prof["chest_coins"] = prof.get("chest_coins", 0.0)
+	prof["chest_secs"] = prof.get("chest_secs", 0)
+	prof["unseen_residents"] = prof.get("unseen_residents", [])
+	var st: Dictionary = prof.get("settings", {})
+	st["haptics"] = st.get("haptics", true)
+	prof["settings"] = st
+	out["profile"] = prof
+	out["version"] = 2
+	return out
 
 static func _quarantine(path: String) -> void:
 	var bad: String = path + ".corrupt"

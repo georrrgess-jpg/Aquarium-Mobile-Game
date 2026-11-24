@@ -10,6 +10,7 @@ config/features=PackedStringArray("4.3", "GL Compatibility")
 config/icon="res://assets/icon.png"
 boot_splash/bg_color=Color(0.0392157, 0.168627, 0.25098, 1)
 boot_splash/show_image=false
+run/low_processor_mode=true
 
 [display]
 

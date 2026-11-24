@@ -30,6 +30,18 @@ var _shown_pearls: int = 0
 ## Pearls still flying to the balance. The HUD only snaps to the true balance
 ## when none are in flight, so a late arrival can never be counted twice.
 var _pearls_in_flight: int = 0
+## Caches so selection taps stay cheap: the coach hint scans every Current preview, so it is
+## computed once per committed state (bumped in _refresh_all), not once per tap.
+var _state_version: int = 0
+var _hint_cache: Dictionary = {}
+var _hint_cache_version: int = -1
+var _stuck_cache: bool = false
+var _stuck_cache_version: int = -1
+var _preview_info: Dictionary = {}
+var _reef_sig: String = ""
+var _income_label_rate: int = -1
+var _tip_pos: int = 0
+var _tip_done: bool = true
 
 var board_view: BoardView
 var gate: GateView
@@ -85,12 +97,13 @@ func _build() -> void:
 	btn_current = _btn("Current", "wave", Pal.CURRENT)
 	btn_dir_a = _btn("", "left", Pal.CURRENT)
 	btn_dir_b = _btn("", "right", Pal.CURRENT)
-	btn_confirm = _btn("Shift", "check", Pal.TEAL)
+	btn_confirm = _btn("Shift", "check", Pal.CORAL)
+	btn_confirm.filled = true
 	btn_tide = _btn("No moves: advance the tide", "tide", Pal.SURGE)
 	prompt_panel = Panel.new()
 	var psb := StyleBoxFlat.new()
-	psb.bg_color = Pal.PANEL_DARK
-	psb.border_color = Pal.GOLD.darkened(0.25)
+	psb.bg_color = Pal.SAND
+	psb.border_color = Pal.CORAL
 	psb.set_border_width_all(2)
 	psb.set_corner_radius_all(14)
 	prompt_panel.add_theme_stylebox_override("panel", psb)
@@ -98,7 +111,7 @@ func _build() -> void:
 	add_child(prompt_panel)
 	prompt_label = Label.new()
 	prompt_label.add_theme_font_size_override("font_size", 19)
-	prompt_label.add_theme_color_override("font_color", Pal.TEXT)
+	prompt_label.add_theme_color_override("font_color", Pal.INK)
 	prompt_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	prompt_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	prompt_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -270,18 +283,49 @@ func enter() -> void:
 func _process(delta: float) -> void:
 	if visible and session != null and session.run != null and session.run.status == RunState.ACTIVE:
 		session.tick(delta)
+		_advance_tip_scan()
+	if reef_peek != null:
+		reef_peek.paused = busy or not visible          # the strip is decoration: rest while the pool animates
+
+## Called by Main once a second after passive income was settled in memory.
+func on_income_tick() -> void:
+	if not visible or busy or _pearls_in_flight > 0 or session == null:
+		return
+	if _shown_coins != session.profile.coins:
+		_shown_coins = session.profile.coins
+		chip_coins.value = fmt_hud(_shown_coins)
+	var rate: int = int(round(session.income_rate()))
+	if rate != _income_label_rate:
+		_income_label_rate = rate
+		chip_coins.label = "Coins  +%d/h" % rate if rate > 0 else "Coins"
+		chip_coins.queue_redraw()
+
+func _unhandled_input(event: InputEvent) -> void:
+	var k := event as InputEventKey
+	if k != null and k.pressed and not k.echo and k.keycode == KEY_ESCAPE and visible and not busy:
+		if cur_mode:
+			_exit_current_mode()
+		elif board_view.selected >= 0:
+			board_view.clear_selection()
+			_update_prompt()
+		get_viewport().set_input_as_handled()
 
 # --- HUD -----------------------------------------------------------------------------
 
 func _refresh_all() -> void:
+	_state_version += 1
 	if _pearls_in_flight == 0:
 		_shown_coins = session.profile.coins
 		_shown_pearls = session.profile.pearls
 	_refresh_hud()
 	_update_buttons()
 	_update_prompt()
-	reef_peek.set_residents(session.profile.residents)
-	reef_peek.caption = "Your reef · %d resident%s · tap to visit" % [session.profile.residents.size(), "" if session.profile.residents.size() == 1 else "s"]
+	var sig: String = "%d|%d" % [session.profile.residents.size(), session.profile.decorations.size()]
+	if sig != _reef_sig:        # only rebuild the reef strip when its content really changed
+		_reef_sig = sig
+		reef_peek.set_residents(session.profile.residents)
+		reef_peek.set_decorations(session.profile.decorations)
+		reef_peek.caption = "Your reef · %d resident%s · tap to visit" % [session.profile.residents.size(), "" if session.profile.residents.size() == 1 else "s"]
 	gate.residents = session.profile.residents.size()
 
 func _refresh_hud() -> void:
@@ -325,6 +369,8 @@ func _apply_motion_setting() -> void:
 	btn_motion.toggled = reduced_motion
 	var snd: bool = bool(session.profile.settings.get("sound", true))
 	sfx.enabled = snd
+	Haptics.enabled = bool(session.profile.settings.get("haptics", true))
+	Haptics.reduced_motion = reduced_motion
 	btn_sound.icon = "sound" if snd else "sound_off"
 
 func _toggle_motion() -> void:
@@ -339,7 +385,7 @@ func _toggle_sound() -> void:
 func _update_buttons() -> void:
 	var run: RunState = session.run
 	var playing: bool = run.status == RunState.ACTIVE
-	var stuck: bool = playing and not busy and session.is_stuck()
+	var stuck: bool = playing and not busy and _is_stuck()
 	btn_tide.visible = stuck and not cur_mode
 	btn_current.visible = not stuck or cur_mode
 	btn_current.enabled = playing and not busy and (run.currents > 0 or cur_mode)
@@ -366,7 +412,7 @@ func _update_buttons() -> void:
 		btn_dir_a.toggled = cur_dir == -1
 		btn_dir_b.toggled = cur_dir == 1
 		btn_confirm.enabled = cur_dir != 0
-		var info: Dictionary = session.preview_current(cur_axis, cur_index, cur_dir) if cur_dir != 0 else {}
+		var info: Dictionary = _preview_info if cur_dir != 0 else {}
 		btn_confirm.text = "Free" if (cur_dir != 0 and not bool(info.get("changes", true))) else "Shift"
 		btn_confirm.enabled = cur_dir != 0
 	gate.hint = false
@@ -400,7 +446,7 @@ func _update_prompt() -> void:
 		elif cur_dir == 0:
 			text = "%s chosen. Pick a direction." % _line_name(cur_axis, cur_index)
 		else:
-			var info: Dictionary = session.preview_current(cur_axis, cur_index, cur_dir)
+			var info: Dictionary = _preview_info
 			var head: String = "%s %s: " % [_line_name(cur_axis, cur_index), _dir_name(cur_axis, cur_dir)]
 			if not bool(info["changes"]):
 				text = head + "nothing changes, so it is free."
@@ -414,10 +460,10 @@ func _update_prompt() -> void:
 		if Creature.tier_of(code) >= GameConfig.RELEASE_MIN_TIER:
 			text = "Tier %d! Drag it to the Reef Gate, or tap the gate." % Creature.tier_of(code)
 			gate.hint = true
-	elif session.is_stuck():
+	elif _is_stuck():
 		text = "No moves left. Advance the tide to the next Surge."
 	else:
-		var hint: Dictionary = _coach_hint()
+		var hint: Dictionary = _cached_hint()
 		text = String(hint["text"])
 		board_view.hint_cells = hint["cells"]
 		board_view.hint_line = hint["line"]
@@ -425,6 +471,48 @@ func _update_prompt() -> void:
 	prompt_label.text = text
 	board_view._over.queue_redraw()
 	board_view._under.queue_redraw()
+
+func _cached_hint() -> Dictionary:
+	if _hint_cache_version != _state_version:
+		_hint_cache = _coach_hint()
+		_hint_cache_version = _state_version
+		_tip_pos = 0
+		_tip_done = session.run.currents <= 0 or not String(_hint_cache["text"]).begins_with("Merge matching")
+	return _hint_cache
+
+## The Current tip ("Row 3 left would make a line") needs a preview of every row/column
+## direction. That costs ~3 ms in one go, so it is spread over a few frames after an action.
+const TIP_PER_FRAME: int = 4
+
+func _advance_tip_scan() -> void:
+	if _tip_done or busy or cur_mode or board_view.selected >= 0 or session.run == null or session.run.status != RunState.ACTIVE:
+		return
+	if _hint_cache_version != _state_version:
+		return
+	var total: int = (GameConfig.ROWS + GameConfig.COLS) * 2
+	for n in TIP_PER_FRAME:
+		if _tip_pos >= total:
+			_tip_done = true
+			return
+		var k: int = _tip_pos
+		_tip_pos += 1
+		var axis: int = Board.AXIS_ROW if k < GameConfig.ROWS * 2 else Board.AXIS_COL
+		var kk: int = k if axis == Board.AXIS_ROW else k - GameConfig.ROWS * 2
+		var idx: int = int(kk / 2.0)
+		var dir: int = -1 if kk % 2 == 0 else 1
+		var inf: Dictionary = session.preview_current(axis, idx, dir)
+		if bool(inf["changes"]) and int(inf["merges"]) > 0:
+			_hint_cache["text"] = "Tip: %s %s would make a line. Try a Current!" % [_line_name(axis, idx), _dir_name(axis, dir)]
+			_hint_cache["line"] = {"axis": axis, "index": idx}
+			_tip_done = true
+			_update_prompt()
+			return
+
+func _is_stuck() -> bool:
+	if _stuck_cache_version != _state_version:
+		_stuck_cache = session.is_stuck()
+		_stuck_cache_version = _state_version
+	return _stuck_cache
 
 ## Short, contextual prompts. The first run teaches the three key actions.
 func _coach_hint() -> Dictionary:
@@ -452,17 +540,7 @@ func _coach_hint() -> Dictionary:
 				out["text"] = "2 · Spend a Current: slide row 2 left. The edge starfish wraps round into a line!"
 				out["line"] = {"axis": Board.AXIS_ROW, "index": 1}
 				return out
-	# a Current that would make a merge right now
-	if run.currents > 0:
-		for axis in [Board.AXIS_ROW, Board.AXIS_COL]:
-			var n_lines: int = GameConfig.ROWS if axis == Board.AXIS_ROW else GameConfig.COLS
-			for idx in n_lines:
-				for dir in [-1, 1]:
-					var inf: Dictionary = session.preview_current(axis, idx, dir)
-					if bool(inf["changes"]) and int(inf["merges"]) > 0:
-						out["text"] = "Tip: %s %s would make a line. Try a Current!" % [_line_name(axis, idx), _dir_name(axis, dir)]
-						out["line"] = {"axis": axis, "index": idx}
-						return out
+	# (the "a Current would make a merge right now" tip is found incrementally, see _process)
 	out["text"] = "Merge matching pairs or slide into empty cells. A Surge lands every 3rd turn."
 	return out
 
@@ -545,6 +623,7 @@ func _run_surge_sequence() -> void:
 	surge_strip.refresh()
 	_update_buttons()
 	_update_prompt()
+	Haptics.surge()
 	if sfx != null:
 		sfx.play("surge")
 	var dur: float = GameConfig.T_SURGE_PREVIEW_REDUCED if reduced_motion else GameConfig.T_SURGE_PREVIEW
@@ -567,6 +646,7 @@ func _run_flood_sequence() -> void:
 	surge_strip.message = "Only %d free cell%s; the wave needs %d" % [int(info.get("free", 0)), "" if int(info.get("free", 0)) == 1 else "s", int(info.get("need", 3))]
 	surge_strip.refresh()
 	prompt_label.text = "The wave cannot fit! The pool floods. Your rewards are safe."
+	Haptics.flood()
 	if sfx != null:
 		sfx.play("flood")
 	await get_tree().create_timer(GameConfig.T_FLOOD_NOTICE / anim_speed, true, false, true).timeout
@@ -603,6 +683,7 @@ func _exit_current_mode() -> void:
 	_update_prompt()
 
 func _clear_line() -> void:
+	_preview_info = {}
 	cur_axis = -1
 	cur_index = -1
 	cur_dir = 0
@@ -611,10 +692,13 @@ func _clear_line() -> void:
 	board_view._under.queue_redraw()
 
 func _apply_line_preview() -> void:
+	_preview_info = {}
+	if cur_axis >= 0 and cur_dir != 0:
+		_preview_info = session.preview_current(cur_axis, cur_index, cur_dir)   # the real Current rules, once
 	if cur_axis < 0:
 		board_view.line_preview = {}
 	else:
-		board_view.line_preview = {"axis": cur_axis, "index": cur_index, "dir": cur_dir}
+		board_view.line_preview = {"axis": cur_axis, "index": cur_index, "dir": cur_dir, "info": _preview_info}
 	board_view._over.queue_redraw()
 	board_view._under.queue_redraw()
 	_update_buttons()

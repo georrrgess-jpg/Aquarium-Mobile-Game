@@ -51,6 +51,34 @@ const STARTER_LAYOUT: Array = [
 	[2, 4, 2, 3], [5, 1, 2, 3],
 ]
 
+# --- Reef economy (Update 2) -----------------------------------------------------------
+## Passive coins per hour for one resident of tier t = PASSIVE_BASE * PASSIVE_TIER_GROWTH^(t-1).
+## The whole reef is then multiplied by (1 + Beauty / BEAUTY_DIVISOR).
+const PASSIVE_BASE_PER_HOUR: float = 5.0
+const PASSIVE_TIER_GROWTH: float = 1.8
+const BEAUTY_DIVISOR: float = 100.0
+## Away time is banked in a chest and capped at this many hours (across repeated relaunches).
+const OFFLINE_CAP_HOURS: int = 8
+## A gap between two income settlements longer than this counts as "away" and goes to the chest
+## instead of straight to the balance (the live game settles every second or so).
+const OFFLINE_THRESHOLD_SEC: int = 90
+const INCOME_TICK_SEC: float = 1.0
+## Visual caps: every resident is always in the roster, but only these are drawn / animated.
+const MAX_DRAWN_RESIDENTS: int = 18
+const MAX_ANIMATED_RESIDENTS: int = 10
+
+## Decorations, cheapest first. Each can be owned once and placed on one marked slot.
+## Beauty adds to the reef multiplier; keep prices escalating and Beauty modest.
+const DECORATIONS: Array = [
+	{"id": "coral_fan", "name": "Coral Fan", "price": 120, "beauty": 3, "blurb": "A soft fan of pink coral."},
+	{"id": "bubble_column", "name": "Bubble Column", "price": 450, "beauty": 5, "blurb": "A vent that never stops singing."},
+	{"id": "sea_lantern", "name": "Sea Lantern", "price": 1200, "beauty": 8, "blurb": "Warm light for the night shift."},
+	{"id": "sunken_statue", "name": "Sunken Statue", "price": 3000, "beauty": 12, "blurb": "Someone's old guardian."},
+	{"id": "light_shaft", "name": "Light Shaft", "price": 7000, "beauty": 18, "blurb": "A beam straight from the surface."},
+]
+## Marked placement spots on the reef floor: x as a fraction of the aquarium width.
+const DECOR_SLOTS: Array = [0.10, 0.27, 0.44, 0.61, 0.78, 0.92]
+
 # --- Seeds ---------------------------------------------------------------------
 const DEFAULT_BASE_SEED: int = 20260101
 
@@ -65,5 +93,5 @@ const T_FLOOD_NOTICE: float = 1.8
 const DRAG_THRESHOLD: float = 10.0
 
 # --- Persistence ---------------------------------------------------------------
-const SAVE_VERSION: int = 1
+const SAVE_VERSION: int = 2
 const SAVE_PATH: String = "user://tidepool_save.json"

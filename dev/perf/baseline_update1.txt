@@ -1,0 +1,21 @@
+=== headless perf_pool
+[perf] pool_dense_sequence | frames=934 | wall ms avg 16.67 p50 16.67 p95 17.70 p99 20.74 max 26.86 | engine-process-monitor ms avg 5.96 p95 13.66 max 13.66 | >33ms frames: 0
+[perf] pool sequence ended at turn 12, status 0, creatures 36
+=== headless perf_reef
+[perf] reef_populated_30_idle | frames=599 | wall ms avg 16.67 p50 16.67 p95 16.75 p99 16.86 max 19.60 | engine-process-monitor ms avg 3.88 p95 8.93 max 8.93 | >33ms frames: 0
+[perf] pool_with_mini_reef_30_idle | frames=599 | wall ms avg 16.67 p50 16.67 p95 16.77 p99 16.91 max 23.60 | engine-process-monitor ms avg 4.23 p95 7.55 max 7.55 | >33ms frames: 0
+=== windowed perf_pool
+[perf] pool_dense_sequence | frames=566 | wall ms avg 37.08 p50 36.45 p95 49.76 p99 57.21 max 75.94 | engine-process-monitor ms avg 50.83 p95 69.91 max 75.53 | >33ms frames: 379
+[perf] pool sequence ended at turn 12, status 0, creatures 36
+=== windowed perf_reef
+[perf] reef_populated_30_idle | frames=284 | wall ms avg 35.02 p50 35.68 p95 47.49 p99 50.21 max 69.40 | engine-process-monitor ms avg 51.07 p95 69.03 max 69.03 | >33ms frames: 170
+[perf] pool_with_mini_reef_30_idle | frames=198 | wall ms avg 50.34 p50 50.06 p95 62.80 p99 67.31 max 71.27 | engine-process-monitor ms avg 61.35 p95 70.49 max 70.49 | >33ms frames: 198
+[playtest] scenario=perf_micro touch=false window=(0, 0) viewport=(960, 960)
+[perf] micro session.is_stuck                                      3.9 us/call
+[perf] micro session.preview_current(one line)                   121.6 us/call
+[perf] micro pool._coach_hint (scans 26 previews)               3537.9 us/call
+[perf] micro pool._update_prompt                                3393.2 us/call
+[perf] micro pool._update_buttons                                  8.1 us/call
+[perf] micro session.valid_targets                                27.1 us/call
+[perf] micro board_view over-layer redraw (draw call build)        0.4 us/call
+[playtest] ok   micro done

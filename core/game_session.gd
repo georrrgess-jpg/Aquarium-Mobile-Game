@@ -35,6 +35,8 @@ func load_or_new() -> void:
 	else:
 		profile = data["profile"]
 		run = data["run"]
+	# first settlement after launch: any real gap since the last save is away time (-> chest)
+	ReefEconomy.settle(profile, GameClock.now())
 
 func save() -> void:
 	if autosave:
@@ -155,15 +157,17 @@ func preview_current(axis: int, index: int, dir: int) -> Dictionary:
 	var b: Board = run.board
 	var shifted: PackedInt32Array = b.shifted(axis, index, dir)
 	if shifted == b.cells:
-		return {"changes": false, "merges": 0, "best_tier": 0}
+		return {"changes": false, "merges": 0, "best_tier": 0, "steps": []}
 	var sim: Board = b.copy()
 	sim.cells = shifted
 	var dirty: Dictionary = _changed_cells(b.cells, shifted)
 	var steps: Array = MergeRules.resolve(sim, dirty, -1, 0)
 	var best: int = 0
-	for s in steps:
-		best = maxi(best, int(s["tier"]))
-	return {"changes": true, "merges": steps.size(), "best_tier": best}
+	var lines: Array = []
+	for st in steps:
+		best = maxi(best, int(st["tier"]))
+		lines.append({"kind": st["kind"], "sources": st["sources"], "result_cell": st["result_cell"], "tier": st["tier"]})
+	return {"changes": true, "merges": steps.size(), "best_tier": best, "steps": lines}
 
 ## True when nothing can be done: no pair, no slide into an empty cell, no
 ## Current that changes the board, and nothing eligible for the Reef Gate.
@@ -310,6 +314,7 @@ func try_release(cell: int) -> Dictionary:
 	if Creature.tier_of(code) < GameConfig.RELEASE_MIN_TIER:
 		return _reject("The Reef Gate wants tier %d or higher" % GameConfig.RELEASE_MIN_TIER)
 	var res: Dictionary = _new_result()
+	ReefEconomy.settle(profile, GameClock.now())   # old rate is paid before the roster changes it
 	b.set_code(cell, 0)
 	var rid: int = profile.next_resident_id
 	profile.next_resident_id += 1
@@ -317,6 +322,7 @@ func try_release(cell: int) -> Dictionary:
 		"id": rid, "code": code, "family": Creature.family_of(code),
 		"tier": Creature.tier_of(code), "run": run.run_number,
 	})
+	profile.unseen_residents.append(rid)
 	run.stats["releases"] += 1
 	res["events"].append({"t": "release", "cell": cell, "code": code, "resident_id": rid})
 	save()
@@ -348,6 +354,42 @@ func land_surge() -> Dictionary:
 	# Landing never triggers matches (spec): no resolve() here.
 	save()
 	return res
+
+# --- Reef (Update 2) ---------------------------------------------------------------------------
+
+func income_rate() -> float:
+	return ReefEconomy.rate_per_hour(profile)
+
+## Credit passive income up to now (in memory; saved with the next committed action).
+## Returns what the settlement did (see ReefEconomy.settle).
+func settle_income() -> Dictionary:
+	return ReefEconomy.settle(profile, GameClock.now())
+
+## Pay the offline chest into the balance. Settles first so nothing is lost, then writes
+## balance and cleared chest in ONE save; a second call pays nothing.
+func claim_chest() -> int:
+	ReefEconomy.settle(profile, GameClock.now())
+	var paid: int = ReefEconomy.claim_chest(profile)
+	save()
+	return paid
+
+## Buy and place a decoration. Income is settled at the old rate first; the charge, the
+## new item and the new rate are written together. A repeat call is a free no-op.
+func purchase_decoration(id: String, slot: int) -> Dictionary:
+	var check: Dictionary = ReefEconomy.can_purchase(profile, id, slot)
+	if not bool(check["ok"]):
+		return check
+	ReefEconomy.settle(profile, GameClock.now())
+	var res: Dictionary = ReefEconomy.purchase(profile, id, slot)
+	if bool(res["ok"]):
+		save()
+	return res
+
+## The player has now looked at the reef: stop highlighting the newest residents.
+func acknowledge_residents() -> void:
+	if not profile.unseen_residents.is_empty():
+		profile.unseen_residents = []
+		save()
 
 # --- Internals -------------------------------------------------------------------
 

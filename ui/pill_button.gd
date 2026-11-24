@@ -17,6 +17,11 @@ var accent: Color = Pal.CURRENT:
 	set(v):
 		accent = v
 		queue_redraw()
+## Primary actions are solid (accent fill, dark text); secondary ones are outlined.
+var filled: bool = false:
+	set(v):
+		filled = v
+		queue_redraw()
 var enabled: bool = true:
 	set(v):
 		enabled = v
@@ -68,6 +73,8 @@ func _draw() -> void:
 	var fill: Color = col.darkened(0.55)
 	if toggled:
 		fill = col.darkened(0.15)
+	if filled and enabled:
+		fill = col
 	if _down:
 		fill = fill.lightened(0.15)
 	elif _hover and enabled:
@@ -77,6 +84,8 @@ func _draw() -> void:
 	_sb.set_border_width_all(2)
 	draw_style_box(_sb, Rect2(Vector2.ZERO, size))
 	var tc: Color = Pal.TEXT if enabled else Color(0.6, 0.7, 0.75)
+	if filled and enabled:
+		tc = Pal.INK
 	var font: Font = ThemeDB.fallback_font
 	var icon_size: float = minf(size.y * 0.5, 26.0)
 	var fs: int = fitted_font_size()
@@ -166,6 +175,7 @@ static func draw_icon(ci: CanvasItem, kind: String, c: Vector2, s: float, col: C
 			ci.draw_circle(c, h * 0.68, Pal.GOLD.darkened(0.2))
 			ci.draw_circle(c, h * 0.5, Pal.GOLD)
 		"pearl":
+			ci.draw_circle(c, h + 1.5, Color("5b86a8"))
 			ci.draw_circle(c, h, Color("e8f4ff"))
 			ci.draw_circle(c + Vector2(-h * 0.25, -h * 0.25), h * 0.35, Color(1, 1, 1, 0.95))
 			ci.draw_arc(c, h, 0.2, 2.9, 12, Color("9cc7ff"), maxf(1.5, s * 0.1), true)

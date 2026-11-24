@@ -44,10 +44,10 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	surv_flow.add_theme_constant_override("h_separation", 8)
 	surv_flow.add_theme_constant_override("v_separation", 8)
 	surv_scroll.add_child(surv_flow)
-	btn_new = _button("New run", "wave", Pal.TEAL)
-	btn_reef = _button("Visit reef", "reef", Pal.GOLD)
+	btn_new = _button("Start the next pool", "wave", Pal.CORAL)
+	btn_reef = _button("Visit your reef", "reef", Pal.CORAL)
 	btn_home = _button("Home", "home", Pal.TEXT_DIM)
-	btn_all = _button("Release all", "reef", Pal.TEAL)
+	btn_all = _button("Release all", "reef", Pal.CORAL)
 	btn_new.pressed.connect(func() -> void: new_run_pressed.emit())
 	btn_reef.pressed.connect(func() -> void: reef_pressed.emit())
 	btn_home.pressed.connect(func() -> void: home_pressed.emit())
@@ -98,14 +98,16 @@ func _layout() -> void:
 	surv_scroll.position = Vector2(m, 422)
 	surv_scroll.size = Vector2(iw, maxf(60.0, ph - 422.0 - 150.0))
 	surv_flow.custom_minimum_size = Vector2(iw - 4.0, 0)
-	var by: float = ph - 130.0
-	btn_new.position = Vector2(m, by)
+	var by: float = ph - 196.0
+	btn_reef.position = Vector2(m, by)
+	btn_reef.size = Vector2(iw, 58)
+	btn_reef.font_size = 22
+	btn_new.position = Vector2(m, by + 66.0)
 	btn_new.size = Vector2(iw, 58)
-	btn_new.font_size = 24
-	btn_reef.position = Vector2(m, by + 66.0)
-	btn_reef.size = Vector2((iw - 8.0) * 0.5, 52)
-	btn_home.position = Vector2(m + (iw + 8.0) * 0.5, by + 66.0)
-	btn_home.size = Vector2((iw - 8.0) * 0.5, 52)
+	btn_new.font_size = 22
+	btn_home.position = Vector2(m, by + 132.0)
+	btn_home.size = Vector2(iw, 44)
+	btn_home.font_size = 18
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED or (what == NOTIFICATION_VISIBILITY_CHANGED and visible):
@@ -134,8 +136,25 @@ func refresh() -> void:
 	stats_label.text = "%s.\n\nTurns played: %d\nMerges: %d   Chains: %d (best +%d)\nCurrents used: %d\nCoins earned: %s   Pearls: %s\nReleased to reef: %d\nTime in pool: %s" % [
 		why, run.turn, int(st["merges"]), int(st["chains"]), int(st["best_chain"]), int(st["shifts"]),
 		PoolScreen._fmt(int(st["coins"])), PoolScreen._fmt(int(st["pearls"])), int(st["releases"]), format_time(run.elapsed)]
-	banked_label.text = "Banked: %s coins · %s pearls · %d in reef" % [PoolScreen._fmt(session.profile.coins), PoolScreen._fmt(session.profile.pearls), session.profile.residents.size()]
+	banked_label.text = "Banked: %s coins · %s pearls" % [PoolScreen._fmt(session.profile.coins), PoolScreen._fmt(session.profile.pearls)]
 	_rebuild_survivors()
+	_refresh_flow()
+
+## The summary leads naturally onward: when residents were released and not yet seen the
+## reef is the highlighted next step (it earns passive coins); otherwise the next pool is.
+func _refresh_flow() -> void:
+	var p: Profile = session.profile
+	var fresh: int = p.unseen_residents.size()
+	var rate: float = ReefEconomy.rate_per_hour(p)
+	var rate_txt: String = ("%.1f" % rate) if rate < 100.0 else ("%.0f" % rate)
+	if fresh > 0:
+		btn_reef.text = "See your %d new resident%s" % [fresh, "" if fresh == 1 else "s"]
+	else:
+		btn_reef.text = "Visit your reef (+%s/h)" % rate_txt
+	btn_reef.filled = fresh > 0
+	btn_new.filled = fresh == 0
+	btn_reef.accent = Pal.CORAL
+	btn_new.accent = Pal.CORAL
 
 func _rebuild_survivors() -> void:
 	for c in surv_flow.get_children():
@@ -173,6 +192,7 @@ func _release_one(cell: int) -> void:
 	if bool(res["ok"]):
 		if sfx != null:
 			sfx.play("release")
+		Haptics.release()
 		refresh()
 
 func _release_all() -> void:

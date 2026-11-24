@@ -9,7 +9,17 @@ var residents: Array = []
 var next_resident_id: int = 1
 var runs_started: int = 0
 var runs_finished: int = 0
-var settings: Dictionary = {"reduced_motion": false, "sound": true}
+var settings: Dictionary = {"reduced_motion": false, "sound": true, "haptics": true}
+## Reef (Update 2). Decorations: [{id, slot}].
+var decorations: Array = []
+## Unix time income has been credited up to, and the fractional coin carried between settlements.
+var income_stamp: int = 0
+var income_frac: float = 0.0
+## Offline chest: pending (unclaimed) coins and the away-seconds already counted toward the cap.
+var chest_coins: float = 0.0
+var chest_secs: int = 0
+## Residents released since the player last looked at the reef (newest highlighted there).
+var unseen_residents: Array = []
 
 func to_dict() -> Dictionary:
 	return {
@@ -20,6 +30,12 @@ func to_dict() -> Dictionary:
 		"runs_started": runs_started,
 		"runs_finished": runs_finished,
 		"settings": settings.duplicate(true),
+		"decorations": decorations.duplicate(true),
+		"income_stamp": income_stamp,
+		"income_frac": income_frac,
+		"chest_coins": chest_coins,
+		"chest_secs": chest_secs,
+		"unseen_residents": unseen_residents.duplicate(),
 	}
 
 static func from_dict(d: Dictionary) -> Profile:
@@ -43,7 +59,18 @@ static func from_dict(d: Dictionary) -> Profile:
 	p.settings = {
 		"reduced_motion": bool(s.get("reduced_motion", false)),
 		"sound": bool(s.get("sound", true)),
+		"haptics": bool(s.get("haptics", true)),
 	}
+	p.decorations = []
+	for dd in d.get("decorations", []):
+		p.decorations.append({"id": String(dd.get("id", "")), "slot": int(dd.get("slot", 0))})
+	p.income_stamp = int(d.get("income_stamp", 0))
+	p.income_frac = float(d.get("income_frac", 0.0))
+	p.chest_coins = float(d.get("chest_coins", 0.0))
+	p.chest_secs = int(d.get("chest_secs", 0))
+	p.unseen_residents = []
+	for u in d.get("unseen_residents", []):
+		p.unseen_residents.append(int(u))
 	return p
 
 func tier_counts() -> Dictionary:

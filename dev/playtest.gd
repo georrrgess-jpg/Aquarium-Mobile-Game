@@ -148,7 +148,7 @@ func snapshot() -> Dictionary:
 	}
 
 func start_pool(fresh_layout: Board = null) -> void:
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	if fresh_layout != null:
 		load_board(fresh_layout)
 
@@ -225,14 +225,14 @@ func check_layout(label: String) -> void:
 
 func scenario_smoke() -> void:
 	await shot("00_start")
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	await shot("01_pool_start")
 
 ## First-run walkthrough using real pointer input: opening merge + chain, illegal
 ## move, wrapped Current, Reef Gate release, Surge on turn 3.
 func scenario_tutorial() -> void:
 	await shot("t00_start")
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
 	check(se.run != null and se.run.turn == 0 and se.run.board.creature_count() == 12, "first run starts with 12 creatures, turn 0")
 	check(se.run.currents == 2, "two starting Currents")
@@ -264,6 +264,8 @@ func scenario_tutorial() -> void:
 	await click_btn(pool().btn_dir_a)
 	check(board().line_preview.get("dir", 0) == -1, "preview shows row 2 shifting left")
 	check(pool().prompt_label.text.find("makes a merge") >= 0, "preview text says it makes a merge before committing")
+	var pinfo: Dictionary = board().line_preview.get("info", {})
+	check(pinfo.get("steps", []).size() == 1 and (pinfo["steps"][0]["sources"] as PackedInt32Array).has(i_(1, 3)) and (pinfo["steps"][0]["sources"] as PackedInt32Array).has(i_(1, 5)), "preview marks the cells that will form the three-in-a-row (from the real rules)")
 	check(se.run.currents == 3 and se.run.turn == 1, "nothing is spent while previewing")
 	await shot("t06_current_preview")
 	await click_btn(pool().btn_confirm)
@@ -313,9 +315,9 @@ func scenario_reload_check() -> void:
 	var f := FileAccess.open(out_dir + "/expected.json", FileAccess.READ)
 	var exp: Dictionary = JSON.parse_string(f.get_as_text())
 	await shot("r00_start_after_reload")
-	check(main.start_screen.btn_play.text == "Resume run", "start screen offers 'Resume run'")
-	check(main.start_screen.chip_res.value == str(int(exp["residents"])), "start-screen reef shows the resident count (%s)" % main.start_screen.chip_res.value)
-	await click_btn(main.start_screen.btn_play)
+	check(main.hub.btn_play.text == "Resume run", "start screen offers 'Resume run'")
+	check(main.hub.chip_res.value == str(int(exp["residents"])), "start-screen reef shows the resident count (%s)" % main.hub.chip_res.value)
+	await click_btn(main.hub.btn_play)
 	var now: Dictionary = snapshot()
 	check(str(now["board"]) == str(exp["board"]), "board identical after reload")
 	check(now["turn"] == int(exp["turn"]) and now["currents"] == int(exp["currents"]), "turn count (%d) and Current charges (%d) identical" % [now["turn"], now["currents"]])
@@ -327,7 +329,7 @@ func scenario_reload_check() -> void:
 
 ## Same key flow with TOUCH events (engine emulates mouse from touch).
 func scenario_touch() -> void:
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
 	check(use_touch, "driver is sending touch events")
 	# tap-select, tap-target merge of the starter pair
@@ -352,7 +354,7 @@ func scenario_touch() -> void:
 
 ## Tier cap, line, trio and the flood, via the live UI on reproducible boards.
 func scenario_rules_ui() -> void:
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
 	# pair merge anywhere
 	load_board(rows_board(["S1 . . . . .", ". . . . . .", ". . . . . .", ". . . . . S1"]), 0, 2)
@@ -414,7 +416,7 @@ func idle_until_summary() -> void:
 func scenario_layout() -> void:
 	var se: GameSession = session()
 	await shot("L00_start")
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var tag: String = "%dx%d" % [DisplayServer.window_get_size().x, DisplayServer.window_get_size().y]
 	var vp: Vector2 = get_viewport().get_visible_rect().size
 	print("[playtest] layout run: window %s logical %s cell=%.0f px (physical %.1f)" % [tag, vp, board().cs, board().cs * DisplayServer.window_get_size().x / vp.x])
@@ -444,11 +446,13 @@ func scenario_layout() -> void:
 	await idle()
 	# forced stuck -> tide button
 	se.force_stuck_for_testing = true
+	bump_ui()
 	pool()._update_buttons()
 	pool()._update_prompt()
 	check_layout("advance tide " + tag)
 	await shot("L05_tide_" + tag)
 	se.force_stuck_for_testing = false
+	bump_ui()
 	pool()._update_buttons()
 	# flood notice
 	pool().surge_strip.danger = true
@@ -466,11 +470,16 @@ func scenario_layout() -> void:
 	await shot("L09_start_" + tag)
 
 ## Tide advance through the real button (stuck is unreachable naturally, so force it).
+## Stuck is flag-forced in tests, so invalidate the UI's per-state caches the way a committed action does.
+func bump_ui() -> void:
+	pool()._state_version += 1
+
 func scenario_tide() -> void:
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
 	load_board(rows_board(["S1 F1 S2 F2 S3 F3"]), 4, 0)
 	se.force_stuck_for_testing = true
+	bump_ui()
 	pool()._update_buttons()
 	pool()._update_prompt()
 	check(pool().btn_tide.visible, "Advance-the-tide button appears when there is no legal action")
@@ -482,9 +491,9 @@ func scenario_tide() -> void:
 
 ## Reduced motion: toggle in the HUD, run a chain, confirm nothing flies and state is identical.
 func scenario_reduced_motion() -> void:
-	await click_btn(main.start_screen.btn_motion)
+	await click_btn(main.hub.btn_motion)
 	check(session().profile.settings["reduced_motion"] == true, "reduced motion toggled on from the start screen")
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	check(board().reduced_motion and pool().reduced_motion, "pool honours reduced motion")
 	await drag_cells(i_(4, 1), i_(4, 2))
 	check(session().run.board.code_at(i_(4, 2)) == Creature.make(1, 3) and session().profile.coins == 48, "same chain and payout with reduced motion")
@@ -500,7 +509,7 @@ func scenario_reduced_motion() -> void:
 ## Reload while a Surge is previewing: close the app mid-preview, reopen, and the
 ## Surge must replay and land exactly once (same cells, same tiers).
 func scenario_surge_reload_a() -> void:
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
 	load_board(rows_board(["S1 . . . . .", ". . . . . .", ". . . . . ."]), 2, 2)
 	se.profile.coins = 500
@@ -523,7 +532,7 @@ func scenario_surge_reload_b() -> void:
 	var want: Dictionary = {}
 	for p in exp["pending_cells"]:
 		want[int(p["cell"])] = int(p["code"])
-	await click(main.start_screen.btn_play.get_global_rect().get_center())
+	await click(main.hub.btn_play.get_global_rect().get_center())
 	await get_tree().create_timer(0.4).timeout
 	check(board().surge_preview.size() == 3, "preview replays after resume")
 	await shot("surge_resume_preview")
@@ -536,7 +545,7 @@ func scenario_surge_reload_b() -> void:
 
 ## Release, then close immediately.
 func scenario_release_reload_a() -> void:
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
 	load_board(rows_board(["F4 . . . . .", ". . . . S5 ."]), 1, 2)
 	await drag(cell_center(i_(0, 0)), gate_center())
@@ -553,18 +562,18 @@ func scenario_release_reload_b() -> void:
 	var se: GameSession = session()
 	check(se.profile.residents.size() == 1, "resident count is 1 after reload (no duplicate, none lost)")
 	check(str(se.run.board.to_array()) == str(exp["board"]), "the released creature is still gone from the board")
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	check(pool().gate.residents == 1, "gate counter shows 1")
 	await shot("release_reload")
 	await click_btn(pool().btn_reef)
-	check(main.current == "reef", "reef screen opens from the pool")
+	check(main.current == "hub_pool", "reef screen opens from the pool")
 	await shot("reef_one_resident")
-	await click_btn(main.reef_screen.btn_back)
+	await click_btn(main.hub.btn_play)
 	check(main.current == "pool", "route back to the pool works")
 
 ## Free (no-change) Current through the UI.
 func scenario_free_current() -> void:
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var se: GameSession = session()
 	load_board(rows_board(["S1 F1 S2 . . .", ". . . . . .", ". . . . . ."]), 0, 2)
 	await click(tab_pos(Board.AXIS_ROW, 2))      # tab tap outside Current mode starts a Current
@@ -588,7 +597,7 @@ func scenario_full_run() -> void:
 	rng.seed = int(main.args.get("botseed", 11))
 	var se: GameSession = session()
 	var wall0: float = Time.get_ticks_msec() / 1000.0
-	await click_btn(main.start_screen.btn_play)
+	await click_btn(main.hub.btn_play)
 	var actions: int = 0
 	if main.args.has("guided"):
 		# the three prompts of the first run: opening merge (chains), wrapped Current, Reef Gate
@@ -708,7 +717,386 @@ func scenario_full_run() -> void:
 	var res_now: int = se.profile.residents.size()
 	await click_btn(main.summary_screen.btn_reef)
 	await shot("full_run_reef")
-	await click_btn(main.reef_screen.btn_back)
+	await click_btn(main.hub.btn_play)
 	await click_btn(main.summary_screen.btn_new)
 	check(se.profile.coins == banked and se.profile.residents.size() == res_now and se.run.turn == 0, "new run carries %d coins and %d residents" % [banked, res_now])
 	await shot("full_run_new_run")
+
+
+func key(code: int) -> void:
+	var k := InputEventKey.new()
+	k.keycode = code
+	k.pressed = true
+	Input.parse_input_event(k)
+	await frames(3)
+
+## One frame per tap / three per drag: genuinely rapid input.
+func fast_click(p: Vector2) -> void:
+	_send_button(p, true)
+	_send_button(p, false)
+	await frames(1)
+
+func fast_drag(a: Vector2, b: Vector2) -> void:
+	_send_button(a, true)
+	_send_move(a.lerp(b, 0.5), (b - a) * 0.5)
+	_send_move(b, (b - a) * 0.5)
+	_send_button(b, false)
+	await frames(1)
+
+func any_legal_move(se: GameSession) -> Array:
+	var b: Board = se.run.board
+	for i in b.cells.size():
+		for j in range(i + 1, b.cells.size()):
+			if MergeRules.can_pair(b, i, j):
+				return [i, j]
+	for i in b.cells.size():
+		if b.code_at(i) == 0:
+			continue
+		for n in b.neighbors(i):
+			if n >= 0 and b.code_at(n) == 0:
+				return [i, n]
+	return []
+
+func right_click(p: Vector2) -> void:
+	var m := InputEventMouseButton.new()
+	m.button_index = MOUSE_BUTTON_RIGHT
+	m.position = to_window(p)
+	m.global_position = m.position
+	m.pressed = true
+	Input.parse_input_event(m)
+	await frames(2)
+	var up := InputEventMouseButton.new()       # always release, or the GUI keeps mouse capture
+	up.button_index = MOUSE_BUTTON_RIGHT
+	up.position = m.position
+	up.global_position = m.position
+	up.pressed = false
+	Input.parse_input_event(up)
+	await frames(2)
+
+## Gesture cancellation, rapid input and transitions.
+func scenario_input() -> void:
+	await click_btn(main.hub.btn_play)
+	var se: GameSession = session()
+	var pairs_board: Array = ["S1 S1 S1 F1 F1 F1", "S2 S2 F2 F2 S3 S3", ". . . . . .", "F3 F3 S1 S1 F1 F1"]
+	# --- cancel a drag with right click: nothing is committed, selection is cleared
+	load_board(rows_board(pairs_board), 0, 2)
+	var snap: Dictionary = snapshot()
+	_send_button(cell_center(i_(0, 0)), true)
+	await frames(2)
+	for k in 5:
+		_send_move(cell_center(i_(0, 0)).lerp(cell_center(i_(2, 3)), float(k + 1) / 5.0), Vector2(8, 8))
+		await frames(1)
+	check(board()._dragging and board().selected == i_(0, 0), "pointer is being tracked while dragging (ghost follows)")
+	await right_click(cell_center(i_(2, 3)))
+	check(not board()._dragging and board().selected == -1, "right click cancels the drag and clears the selection")
+	_send_button(cell_center(i_(2, 3)), false)
+	await frames(3)
+	check(snapshot()["board"] == snap["board"] and snapshot()["turn"] == 0, "nothing was committed by the cancelled gesture")
+	# --- Esc cancels a selection and Current mode
+	await click(cell_center(i_(0, 1)))
+	check(board().selected == i_(0, 1), "tap selects")
+	await key(KEY_ESCAPE)
+	check(board().selected == -1, "Esc clears the selection")
+	await click_btn(pool().btn_current)
+	check(pool().cur_mode, "Current mode on")
+	await key(KEY_ESCAPE)
+	check(not pool().cur_mode, "Esc leaves Current mode")
+	# --- pointer leaves the window mid-drag: gesture is dropped, release does nothing
+	_send_button(cell_center(i_(0, 0)), true)
+	await frames(2)
+	for k in 4:
+		_send_move(cell_center(i_(0, 0)).lerp(cell_center(i_(0, 1)), float(k + 1) / 4.0), Vector2(8, 0))
+		await frames(1)
+	board()._notification(Node.NOTIFICATION_WM_MOUSE_EXIT)
+	check(not board()._dragging, "leaving the window cancels the drag")
+	_send_button(cell_center(i_(0, 1)), false)
+	await frames(3)
+	check(snapshot()["turn"] == 0 and snapshot()["board"] == snap["board"], "a drag cancelled by the window edge commits nothing")
+	var n_dim: int = 0
+	for k in board()._nodes:
+		if (board()._nodes[k] as Control).modulate.a < 0.99:
+			n_dim += 1
+	check(n_dim == 0, "no piece is left dimmed after the cancelled drag")
+	# --- input locked mid-drag (what a Surge start does)
+	await click(cell_center(i_(0, 0)))
+	_send_button(cell_center(i_(0, 0)), true)
+	await frames(2)
+	for k in 4:
+		_send_move(cell_center(i_(0, 0)).lerp(cell_center(i_(0, 1)), float(k + 1) / 4.0), Vector2(8, 0))
+		await frames(1)
+	board().interactive = false
+	check(not board()._dragging, "locking input cancels an in-flight drag")
+	board().interactive = true
+	_send_button(cell_center(i_(0, 1)), false)
+	await frames(3)
+	check(snapshot()["turn"] == 0, "no action from the locked gesture")
+	board().clear_selection()
+	# --- leaving the screen with a selection: no stale selection on return
+	await click(cell_center(i_(0, 0)))
+	await click_btn(pool().btn_reef)
+	await click_btn(main.hub.btn_play)
+	check(board().selected == -1 and not pool().cur_mode, "selection and Current mode are clear after visiting the reef")
+	# --- rapid input while an action animates: exactly one action commits
+	load_board(rows_board(pairs_board), 0, 2)
+	board().anim_speed = 0.15                    # a ~3 s animation: spam lands deep inside the busy window
+	await drag(cell_center(i_(0, 0)), cell_center(i_(0, 1)))
+	var spam: int = 0
+	for k2 in 10:
+		await fast_click(cell_center(i_(0, 3 + (k2 % 3))))
+		await fast_click(cell_center(i_(3, k2 % 6)))
+		await fast_drag(cell_center(i_(3, 0)), cell_center(i_(3, 1)))
+		spam += 3
+	check(pool().busy, "still animating after %d rapid taps/drags" % spam)
+	check(se.run.turn == 1, "none of them committed an extra action (turn %d)" % se.run.turn)
+	await idle()
+	board().anim_speed = 1.0
+	check(se.run.turn == 1, "and none were queued up to fire afterwards (turn %d)" % se.run.turn)
+	# --- rapid input during a Surge preview
+	load_board(rows_board(pairs_board), 2, 2)
+	await drag(cell_center(i_(0, 0)), cell_center(i_(0, 1)))        # turn 3 -> Surge preview
+	await get_tree().create_timer(0.5).timeout
+	check(se.run.pending_surge.size() == 3, "Surge is previewing")
+	var frozen: Array = se.run.board.to_array()
+	var before_cnt: int = se.run.board.creature_count()
+	for k in 8:
+		await fast_click(cell_center(i_(1, k % 6)))
+		await fast_drag(cell_center(i_(3, 0)), cell_center(i_(3, 1)))
+		await fast_click(cell_center(i_(3, 1)))
+	check(se.run.pending_surge.size() == 3, "still previewing after the spam")
+	check(se.run.turn == 3 and str(se.run.board.to_array()) == str(frozen), "input during the Surge preview is ignored (turn 3, board unchanged)")
+	await idle()
+	check(se.run.pending_surge.is_empty() and se.run.board.creature_count() == before_cnt + 3, "Surge landed once, exactly three creatures")
+	var t_before: int = se.run.turn
+	var mv: Array = any_legal_move(se)
+	await drag(cell_center(mv[0]), cell_center(mv[1]))
+	await idle()
+	check(se.run.turn == t_before + 1, "input is restored after the Surge lands")
+	# --- rapid input during the flood notice
+	var rows: Array = []
+	for r in GameConfig.ROWS:
+		var toks: PackedStringArray = PackedStringArray()
+		for c in GameConfig.COLS:
+			toks.append("S1" if (r + c) % 2 == 0 else "F2")
+		rows.append(" ".join(toks))
+	var fb: Board = rows_board(rows)
+	fb.set_code(i_(6, 4), 0)
+	fb.set_code(i_(6, 5), 0)
+	load_board(fb, 2, 2)
+	await drag(cell_center(i_(6, 3)), cell_center(i_(6, 4)))
+	await get_tree().create_timer(0.4).timeout
+	var turn_f: int = se.run.turn
+	for k in 8:
+		await fast_click(cell_center(i_(k % 7, 0)))
+		await fast_drag(cell_center(i_(k % 7, 1)), cell_center(i_(k % 7, 2)))
+	check(se.run.status == RunState.FLOODED and se.run.turn == turn_f, "input during the flood notice does nothing")
+	await idle_until_summary()
+	check(main.current == "summary", "flood ends at the summary")
+	await click_btn(main.summary_screen.btn_new)
+	check(board().interactive and not pool().busy and se.run.turn == 0, "input is restored in the next pool")
+
+## Hub layout and overlap at the viewport this process launched with.
+func scenario_hub_layout() -> void:
+	var se: GameSession = session()
+	GameClock.freeze(1795000000)
+	se.profile.residents = fake_residents(24)
+	se.profile.next_resident_id = 25
+	se.profile.unseen_residents = [24]
+	se.profile.coins = 123456789
+	se.profile.decorations = [{"id": "coral_fan", "slot": 1}, {"id": "sea_lantern", "slot": 4}]
+	se.profile.income_stamp = GameClock.now()
+	GameClock.advance(9 * 3600)
+	se.settle_income()
+	var tag: String = "%dx%d" % [DisplayServer.window_get_size().x, DisplayServer.window_get_size().y]
+	for ctx in ["start", "hub_pool"]:
+		main.show_screen(ctx)
+		await frames(5)
+		for tab in [0, 1]:
+			await click_btn(main.hub.tab_buttons[tab])
+			check_hub_layout("%s tab %d %s" % [ctx, tab, tag])
+			await shot("H_%s_tab%d_%s" % [ctx, tab, tag])
+	main.hub.leave()
+	GameClock.reset()
+
+func check_hub_layout(label: String) -> void:
+	var h: ReefHub = main.hub
+	var vp: Rect2 = get_viewport().get_visible_rect()
+	var named: Dictionary = {
+		"title": h.title_label, "coins": h.chip_coins, "pearls": h.chip_pearls, "res": h.chip_res, "reef": h.reef, "income": h.income,
+		"chest": h.chest_banner, "claim": h.btn_claim, "panel": h.panel, "play": h.btn_play, "motion": h.btn_motion, "sound": h.btn_sound, "haptics": h.btn_haptics,
+	}
+	for i in h.tab_buttons.size():
+		named["tab%d" % i] = h.tab_buttons[i]
+	var rects: Dictionary = {}
+	for k in named:
+		var c: Control = named[k]
+		if c.is_visible_in_tree():
+			rects[k] = c.get_global_rect()
+	var bad: PackedStringArray = PackedStringArray()
+	for k in rects:
+		var r: Rect2 = rects[k]
+		if r.position.x < -0.5 or r.position.y < -0.5 or r.end.x > vp.end.x + 0.5 or r.end.y > vp.end.y + 0.5:
+			bad.append("%s off screen %s" % [k, r])
+	var keys: Array = rects.keys()
+	for i in keys.size():
+		for j in range(i + 1, keys.size()):
+			var intended: bool = (keys[i] == "chest" and keys[j] == "claim")     # Claim sits on the banner by design
+			if not intended and (rects[keys[i]] as Rect2).intersection(rects[keys[j]]).get_area() > 1.0:
+				bad.append("%s overlaps %s" % [keys[i], keys[j]])
+	for ck in ["coins", "pearls", "res"]:
+		if not (named[ck] as HudWidgets.Chip).text_fits():
+			bad.append("chip %s '%s' does not fit" % [ck, (named[ck] as HudWidgets.Chip).value])
+	for bk in ["play", "motion", "sound", "haptics", "claim"]:
+		var pb: PillButton = named[bk]
+		if pb.is_visible_in_tree() and not pb.content_fits():
+			bad.append("button %s '%s' does not fit" % [bk, pb.text])
+	for i in h.tab_buttons.size():
+		var tb: PillButton = h.tab_buttons[i]
+		if not tb.content_fits():
+			bad.append("tab '%s' does not fit" % tb.text)
+	check(bad.is_empty(), "hub layout[%s] %d elements, no overlap, on screen%s" % [label, rects.size(), "" if bad.is_empty() else " -> " + "; ".join(bad)])
+
+# --- Update 2 checkpoint -----------------------------------------------------------------------------
+
+func rate_now() -> float:
+	return ReefEconomy.rate_per_hour(session().profile)
+
+## Stage A: a real run through the UI, a Current preview, a Surge, two releases, a decoration purchase.
+func scenario_u2_checkpoint_a() -> void:
+	await click_btn(main.hub.btn_play)
+	var se: GameSession = session()
+	await tap_cells(i_(4, 1), i_(4, 2))                                   # opening merge + chain
+	await click_btn(pool().btn_current)
+	await click(tab_pos(Board.AXIS_ROW, 1))
+	await click_btn(pool().btn_dir_a)
+	var info: Dictionary = board().line_preview.get("info", {})
+	check(info.get("steps", []).size() == 1, "Current preview shows the line it will make")
+	check(se.run.currents == 3 and se.run.turn == 1, "previewing spent nothing")
+	await click_btn(pool().btn_dir_b)                                      # change direction while previewing
+	await click_btn(pool().btn_current)                                    # cancel: still free
+	check(not pool().cur_mode and se.run.currents == 3 and se.run.turn == 1, "cancelling the preview is free")
+	await click_btn(pool().btn_current)
+	await click(tab_pos(Board.AXIS_ROW, 1))
+	await click_btn(pool().btn_dir_a)
+	await click_btn(pool().btn_confirm)                                    # commit the wrap -> tier 4
+	check(se.run.board.code_at(i_(1, 4)) == Creature.make(2, 4) and se.run.turn == 2, "wrapped Current committed (tier 4 Starfish)")
+	await drag(cell_center(i_(1, 4)), gate_center())                      # release #1
+	await idle()
+	check(se.profile.residents.size() == 1, "first release")
+	await drag(cell_center(i_(0, 2)), cell_center(i_(0, 3)))              # turn 3 -> Surge
+	await get_tree().create_timer(0.6).timeout
+	check(se.run.pending_surge.size() == 3, "Surge triggered on turn 3")
+	await idle()
+	await tap_cells(i_(4, 2), i_(6, 4))                                    # S3 + S3 -> S4
+	check(se.run.board.code_at(i_(6, 4)) == Creature.make(1, 4), "tier 4 Shrimp made by pair merge")
+	await click(cell_center(i_(6, 4)))
+	await click(gate_center())                                             # release #2
+	await idle()
+	check(se.profile.residents.size() == 2, "second release")
+	var coins: int = se.profile.coins
+	check(coins >= int(GameConfig.DECORATIONS[0]["price"]), "first decoration is affordable by turn 4 (%d coins)" % coins)
+	# the reef: newest resident highlighted, then buy and place a decoration
+	await click_btn(pool().btn_reef)
+	check(main.hub.visible and main.current == "hub_pool", "reef opens from the pool")
+	check(se.profile.unseen_residents.size() == 2 and main.hub.reef.highlight_ids.size() == 2, "both new residents are highlighted in the reef")
+	await shot("u2_reef_new_residents")
+	var rate0: float = rate_now()
+	await click_btn(main.hub.tab_buttons[1])
+	await click(main.hub.decor_list.get_global_rect().position + Vector2(100, 15))           # Coral Fan row
+	check(main.hub.reef.placing_kind == 0, "decoration selected: marked spots shown on the reef")
+	check(main.hub.btn_buy.enabled == false, "buy waits for a chosen spot")
+	await click(main.hub.reef.get_global_rect().position + main.hub.reef.slot_rect(2).get_center())
+	check(main.hub._sel_slot == 2 and main.hub.btn_buy.enabled, "spot chosen: ghost preview, buy enabled")
+	check(main.hub.decor_summary.text.find("120") >= 0 and main.hub.decor_summary.text.find("→") >= 0, "cost and income change are shown before buying ('%s')" % main.hub.decor_summary.text.replace("\n", " | "))
+	await shot("u2_decor_preview")
+	# double press: one charge only
+	var bb: Vector2 = main.hub.btn_buy.get_global_rect().get_center()
+	_send_button(bb, true)
+	_send_button(bb, false)
+	_send_button(bb, true)
+	_send_button(bb, false)
+	await frames(6)
+	check(se.profile.decorations.size() == 1 and se.profile.coins == coins - 120, "double-press charged once and placed one item (coins %d)" % se.profile.coins)
+	check(absf(rate_now() - rate0 * 1.03) < 0.01, "income went up by the Beauty multiplier (%.2f -> %.2f /h)" % [rate0, rate_now()])
+	await shot("u2_decor_placed")
+	check(se.profile.unseen_residents.size() == 2, "still highlighted until the player leaves the reef")
+	await click_btn(main.hub.btn_play)
+	check(main.current == "pool" and se.profile.unseen_residents.is_empty(), "back to the pool; highlight cleared")
+	var rec: Dictionary = snapshot()
+	rec["decor"] = se.profile.decorations.duplicate(true)
+	rec["rate"] = rate_now()
+	var f := FileAccess.open(out_dir + "/expected_u2.json", FileAccess.WRITE)
+	f.store_string(JSON.stringify(rec))
+	f.close()
+
+## Later stages reopen the same save with the clock moved forward (launch with --clock/--tz).
+func scenario_u2_stage() -> void:
+	var f := FileAccess.open(out_dir + "/expected_u2.json", FileAccess.READ)
+	var exp: Dictionary = JSON.parse_string(f.get_as_text())
+	var stage: int = int(main.args.get("stage", 1))
+	var se: GameSession = session()
+	var rate: float = float(exp["rate"])
+	check(se.profile.decorations.size() == 1 and se.profile.residents.size() == 2, "[stage %d] decoration and both residents survived the reopen" % stage)
+	check(se.run != null and str(se.run.board.to_array()) == str(exp["board"]) and se.run.turn == int(exp["turn"]), "[stage %d] active run intact (turn %d)" % [stage, se.run.turn])
+	var cap: float = rate * 8.0
+	match stage:
+		1:
+			check(se.profile.chest_secs > 3 * 3600 - 300 and se.profile.chest_secs < 3 * 3600 + 300, "[1] about 3 h away -> chest holds %d s" % se.profile.chest_secs)
+			check(absf(se.profile.chest_coins - rate * float(se.profile.chest_secs) / 3600.0) < 0.5, "[1] chest = rate x away time (%.1f coins)" % se.profile.chest_coins)
+			check(se.profile.coins == int(exp["coins"]), "[1] balance untouched until claimed")
+			se.save()
+		2:
+			check(se.profile.chest_secs == 8 * 3600 and absf(se.profile.chest_coins - cap) < 0.5, "[2] 20 h total away: capped at 8 h (%.1f coins)" % se.profile.chest_coins)
+			se.save()
+		3:
+			check(se.profile.chest_secs == 8 * 3600 and absf(se.profile.chest_coins - cap) < 0.5, "[3] third relaunch: still exactly the 8 h cap, no stacking (%.1f)" % se.profile.chest_coins)
+			var amount: int = ReefEconomy.chest_amount(se.profile)
+			var coins0: int = se.profile.coins
+			main.show_screen("start")
+			await frames(10)
+			check(main.hub.chest_banner.visible and main.hub.btn_claim.visible, "[3] the chest is shown on the reef hub")
+			await shot("u2_chest")
+			var cb: Vector2 = main.hub.btn_claim.get_global_rect().get_center()
+			_send_button(cb, true)
+			_send_button(cb, false)
+			_send_button(cb, true)
+			_send_button(cb, false)
+			await frames(8)
+			check(se.profile.coins >= coins0 + amount - 1 and se.profile.coins <= coins0 + amount + 3, "[3] claimed once: +%d coins (balance %d -> %d)" % [amount, coins0, se.profile.coins])
+			check(se.profile.chest_coins == 0.0 and se.profile.chest_secs == 0 and not main.hub.chest_banner.visible, "[3] pending amount cleared with the claim")
+			var after: int = se.profile.coins
+			check(se.claim_chest() == 0 and se.profile.coins == after, "[3] a repeated claim pays nothing")
+			var rec: Dictionary = {"coins": se.profile.coins}
+			var wf := FileAccess.open(out_dir + "/expected_u2_claimed.json", FileAccess.WRITE)
+			wf.store_string(JSON.stringify(rec))
+			wf.close()
+		4:
+			var f2 := FileAccess.open(out_dir + "/expected_u2_claimed.json", FileAccess.READ)
+			var claimed: Dictionary = JSON.parse_string(f2.get_as_text())
+			check(se.profile.coins >= int(claimed["coins"]) and se.profile.coins <= int(claimed["coins"]) + 2, "[4] claimed coins persisted through reload (%d)" % se.profile.coins)
+			check(se.profile.chest_secs > 0 and se.profile.chest_secs < 8 * 3600, "[4] a new absence starts a fresh chest (%d s)" % se.profile.chest_secs)
+
+## An Update 1 save, copied, opened in the Update 2 build.
+func scenario_u2_migrate() -> void:
+	var raw: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/save_v1_midrun.json"))
+	var se: GameSession = session()
+	check(se.run != null and se.run.turn == int(raw["run"]["turn"]) and se.run.currents == int(raw["run"]["currents"]), "v1 active run loaded (turn %d, Currents %d)" % [se.run.turn, se.run.currents])
+	check(se.profile.coins == int(raw["profile"]["coins"]) and se.profile.pearls == int(raw["profile"]["pearls"]), "balances kept (%d / %d)" % [se.profile.coins, se.profile.pearls])
+	check(se.profile.residents.size() == raw["profile"]["residents"].size(), "every resident kept (%d)" % se.profile.residents.size())
+	check(main.hub.btn_play.text == "Resume run", "hub offers Resume run")
+	await shot("u2_migrated_hub")
+	await click_btn(main.hub.btn_play)
+	check(str(se.run.board.to_array()) == str(raw["run"]["board"]), "board identical in the pool")
+	var mv: Array = any_legal_move(se)
+	await drag(cell_center(mv[0]), cell_center(mv[1]))
+	await idle()
+	check(se.run.turn == int(raw["run"]["turn"]) + 1, "the migrated run is playable")
+	var doc: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(se.save_path))
+	check(int(doc["version"]) == GameConfig.SAVE_VERSION, "saved back as version %d" % int(doc["version"]))
+
+func fake_residents(n: int) -> Array:
+	var out: Array = []
+	for i in n:
+		var fam: int = 1 + (i % 2)
+		var tier: int = 4 + (i % 3)
+		out.append({"id": i + 1, "code": Creature.make(fam, tier), "family": fam, "tier": tier, "run": 1})
+	return out

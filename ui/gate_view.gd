@@ -22,9 +22,16 @@ var reduced_motion: bool = false
 var _t: float = 0.0
 var _press: Vector2 = Vector2.ZERO
 var _flash: float = 0.0
+var _sb: StyleBoxFlat = StyleBoxFlat.new()
+var _isb: StyleBoxFlat = StyleBoxFlat.new()
+var _ogb: StyleBoxFlat = StyleBoxFlat.new()
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	_sb.anti_aliasing = true
+	_isb.anti_aliasing = true
+	_ogb.anti_aliasing = true
+	_ogb.bg_color = Color(0, 0, 0, 0)
 
 func pulse() -> void:
 	_flash = 1.0
@@ -58,34 +65,27 @@ func _draw() -> void:
 	elif hint:
 		glow = 0.5 + (0.0 if reduced_motion else 0.3 * sin(_t * 4.0))
 	glow = maxf(glow, _flash)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Pal.PANEL_DARK
-	sb.set_corner_radius_all(16)
-	sb.corner_radius_top_left = int(w * 0.5)
-	sb.corner_radius_top_right = int(w * 0.5)
-	sb.border_color = Pal.TEAL if glow > 0.0 else Pal.TEXT_DIM.darkened(0.3)
-	sb.set_border_width_all(3 if glow > 0.0 else 2)
-	sb.anti_aliasing = true
+	var half: int = int(w * 0.5)
+	_sb.bg_color = Pal.SAND
+	_sb.set_corner_radius_all(16)
+	_sb.corner_radius_top_left = half
+	_sb.corner_radius_top_right = half
+	_sb.border_color = Pal.CORAL if glow > 0.0 else Pal.SAND_DARK
+	_sb.set_border_width_all(4 if glow > 0.0 else 3)
 	if glow > 0.0:
-		var og := StyleBoxFlat.new()
-		og.bg_color = Color(0, 0, 0, 0)
-		og.border_color = Color(Pal.TEAL, 0.35 * glow)
-		og.set_border_width_all(6)
-		og.set_corner_radius_all(18)
-		og.corner_radius_top_left = int(w * 0.5) + 3
-		og.corner_radius_top_right = int(w * 0.5) + 3
-		og.anti_aliasing = true
-		draw_style_box(og, Rect2(Vector2(-3, -3), size + Vector2(6, 6)))
-	draw_style_box(sb, Rect2(Vector2.ZERO, size))
-	# water inside the arch
-	var inner := Rect2(Vector2(8, 8), size - Vector2(16, 16))
-	var isb := StyleBoxFlat.new()
-	isb.bg_color = Color("1d8fb8").lerp(Color("5eead4"), glow * 0.6)
-	isb.set_corner_radius_all(10)
-	isb.corner_radius_top_left = int(inner.size.x * 0.5)
-	isb.corner_radius_top_right = int(inner.size.x * 0.5)
-	isb.anti_aliasing = true
-	draw_style_box(isb, inner)
+		_ogb.border_color = Color(Pal.CORAL, 0.4 * glow)
+		_ogb.set_border_width_all(6)
+		_ogb.set_corner_radius_all(18)
+		_ogb.corner_radius_top_left = half + 3
+		_ogb.corner_radius_top_right = half + 3
+		draw_style_box(_ogb, Rect2(Vector2(-3, -3), size + Vector2(6, 6)))
+	draw_style_box(_sb, Rect2(Vector2.ZERO, size))
+	var inner := Rect2(Vector2(9, 9), size - Vector2(18, 18))
+	_isb.bg_color = Color("1f9bbd").lerp(Color("8ff3df"), glow * 0.6)
+	_isb.set_corner_radius_all(10)
+	_isb.corner_radius_top_left = int(inner.size.x * 0.5)
+	_isb.corner_radius_top_right = int(inner.size.x * 0.5)
+	draw_style_box(_isb, inner)
 	# ripples
 	for k in 4:
 		var y: float = h * (0.32 + 0.14 * float(k))
@@ -103,7 +103,7 @@ func _draw() -> void:
 	draw_string(font, Vector2(0, h * 0.62 + 20), "drop or", HORIZONTAL_ALIGNMENT_CENTER, w, 14, Pal.TEXT_DIM)
 	draw_string(font, Vector2(0, h * 0.62 + 36), "tap here", HORIZONTAL_ALIGNMENT_CENTER, w, 14, Pal.TEXT_DIM)
 	# residents counter
-	var cy: float = h - 34.0
+	var cy: float = h - 42.0
 	draw_circle(Vector2(w * 0.5, cy + 6.0), 17.0, Pal.INK)
 	draw_string(font, Vector2(0, cy + 13.0), str(residents), HORIZONTAL_ALIGNMENT_CENTER, w, 22, Pal.GOLD)
-	draw_string(font, Vector2(0, h - 4.0), "in reef", HORIZONTAL_ALIGNMENT_CENTER, w, 13, Pal.TEXT_DIM)
+	draw_string(font, Vector2(0, h - 12.0), "in reef", HORIZONTAL_ALIGNMENT_CENTER, w, 13, Pal.TEXT_DIM)

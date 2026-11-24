@@ -2,26 +2,33 @@ class_name Pal
 extends RefCounted
 ## Colours for the placeholder look.
 
-const BG_TOP := Color("0a2b40")
-const BG_BOTTOM := Color("06192a")
-const PANEL := Color("14455e")
-const PANEL_DARK := Color("0d3248")
-const CELL := Color("1d5a78")
-const CELL_ALT := Color("1a5270")
-const TEXT := Color("eaf7fc")
-const TEXT_DIM := Color("9fc7d8")
+# One look for pool, HUD and reef: clear teal water, warm sand, coral accents.
+const BG_TOP := Color("0f6f84")
+const BG_BOTTOM := Color("08394b")
+const PANEL := Color("11697b")
+const PANEL_DARK := Color("0a4555")
+const CELL := Color("1b8196")
+const CELL_ALT := Color("187789")
+const TEXT := Color("fff6e0")
+const TEXT_DIM := Color("e2d2a6")
 const GOLD := Color("ffd166")
 const TEAL := Color("5eead4")
-const RED := Color("ff7a7a")
+const TARGET := Color("c4fff2")       # legal-target mint: light enough to read on teal tiles
+const RED := Color("ff6f61")
 const SURGE := Color("ff9e5e")
-const CURRENT := Color("6ec6ff")
+const CURRENT := Color("8fd8ff")
+const CORAL := Color("ff7f6b")        # primary accent (buttons, highlights)
+const CORAL_DARK := Color("b9473a")
+const SAND := Color("f2dfb0")         # warm light surface (HUD chips, cards)
+const SAND_DARK := Color("c9ad73")
+const SAND_DEEP := Color("a98d55")
 const SHRIMP_BODY := Color("ff7d6e")
 const SHRIMP_DARK := Color("b8453d")
 const SHRIMP_LIGHT := Color("ffc2a8")
 const STAR_BODY := Color("f6c453")
 const STAR_DARK := Color("b9791f")
 const STAR_LIGHT := Color("ffe9a0")
-const INK := Color("0b1f2c")
+const INK := Color("0b2a33")
 
 ## Ring/badge colour per tier (index = tier - 1).
 const TIER_COLORS: Array = [

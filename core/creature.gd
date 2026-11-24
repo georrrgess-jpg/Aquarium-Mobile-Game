@@ -5,11 +5,14 @@ extends RefCounted
 const NONE: int = 0
 const SHRIMP: int = 1
 const STAR: int = 2
+## Visitor family: never spawns on the board; only exists as a reef resident.
+const RAY: int = 3
 
-const FAMILY_NAMES: Dictionary = {1: "Shrimp", 2: "Starfish"}
+const FAMILY_NAMES: Dictionary = {1: "Shrimp", 2: "Starfish", 3: "Lantern Ray"}
 const TIER_NAMES: Dictionary = {
 	1: ["Glass", "Cleaner", "Snapper", "Harlequin", "Mantis", "Emperor"],
 	2: ["Sprig", "Sand", "Cushion", "Bat", "Sunflower", "Crown"],
+	3: ["", "", "", "Glow", "Radiant", "Beacon"],
 }
 
 static func make(family: int, tier: int) -> int:
@@ -28,6 +31,8 @@ static func full_name(code: int) -> String:
 	if code <= 0:
 		return "empty"
 	var names: Array = TIER_NAMES[family_of(code)]
+	if family_of(code) == RAY:
+		return "Lantern Ray (T%d)" % tier_of(code)
 	return "%s %s (T%d)" % [names[tier_of(code) - 1], FAMILY_NAMES[family_of(code)], tier_of(code)]
 
 static func short_name(code: int) -> String:
