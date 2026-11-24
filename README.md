@@ -1,5 +1,27 @@
 # Tidepool Tycoon · first playable
 
+## ▶ [Play in your browser](https://georrrgess-jpg.github.io/Aquarium-Mobile-Game/)
+
+The playable web build lives in [`docs/`](docs/) and is served by GitHub Pages
+from this branch. It installs as a home-screen app and works offline after the
+first load; your progress is saved in the browser.
+
+**Add it to your home screen**
+* **iPhone / iPad (Safari):** open the link, tap **Share** → **Add to Home Screen**.
+* **Android (Chrome):** open the link, tap **⋮** → **Add to Home screen** / **Install app**.
+
+It then opens full-screen in portrait like a normal app. After a new build is
+pushed, close and reopen it once to pick up the update.
+
+**One-time setup (repo owner):** *Settings → Pages → Build and deployment →
+Source: Deploy from a branch → Branch: `claude/funny-volta-q63lzq`, folder
+`/docs` → Save.* The site appears at the link above a minute or two later.
+
+**Rebuilding the web version:** `GODOT=/path/to/godot dev/export_web.sh`
+(needs Godot 4.3 with its export templates installed), then commit `docs/`.
+
+---
+
 A portrait mobile merge puzzle. Waves crowd a tidal pool; the creatures you
 make can be released through the **Reef Gate** and become permanent residents of
 your reef. Godot 4.3, typed GDScript, GL Compatibility renderer.
@@ -63,7 +85,9 @@ core/                   rules, state and save, no UI:
   run_state.gd profile.gd save_store.gd game_session.gd (action front door)
 ui/                     screens and widgets (all drawn procedurally; no art assets)
 tests/test_core.gd      headless rules tests (133 checks)
-dev/                    playtest driver, balance simulation, scripts
+dev/                    playtest driver, balance simulation, export_web.sh
+docs/                   the exported web build (GitHub Pages), screenshots
+export_presets.cfg      Web export: no threads (works on Pages), installable PWA, portrait
 ```
 
 `GameSession` is the single entry point for actions. Each action is resolved
