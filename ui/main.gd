@@ -12,6 +12,7 @@ var hub: ReefHub
 var pool_screen: PoolScreen
 var trial_screen: PoolScreen
 var help_screen: PoolScreen
+var backdrop: Backdrop
 var safe_top: float = 0.0
 var safe_bottom: float = 0.0
 var summary_screen: SummaryScreen
@@ -36,6 +37,9 @@ func _ready() -> void:
 	session.load_or_new()
 	sfx = Sfx.new()
 	add_child(sfx)
+	backdrop = Backdrop.new()
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
 	hub = ReefHub.new()
 	pool_screen = PoolScreen.new()
 	summary_screen = SummaryScreen.new()
@@ -136,12 +140,23 @@ func _parse_args() -> Dictionary:
 		out[parts[0]] = parts[1] if parts.size() > 1 else true
 	return out
 
-func _draw() -> void:
-	var pal: Dictionary = Tide.palette(maxi(_phase, 0)) if _phase >= 0 else Tide.palette(Tide.MIDDAY)
-	var top: Color = pal["bg_top"]
-	var bottom: Color = pal["bg_bottom"]
-	draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(size.x, 0), size, Vector2(0, size.y)]),
-		PackedColorArray([top, top, bottom, bottom]))
+## The backdrop's quiet zone follows the live board; animation runs only behind pool-style screens.
+func _sync_backdrop() -> void:
+	if backdrop == null:
+		return
+	var pool_like: bool = pool_screen.visible or trial_screen.visible or help_screen.visible
+	backdrop.animate_enabled = pool_like
+	var want_vis: bool = pool_like or summary_screen.visible
+	if backdrop.visible != want_vis:
+		backdrop.visible = want_vis
+	if not backdrop.visible:
+		return
+	var sc: PoolScreen = pool_screen if pool_screen.visible else (trial_screen if trial_screen.visible else help_screen)
+	if pool_like and sc.board_view != null:
+		var bv: BoardView = sc.board_view
+		var tl: Vector2 = bv.get_global_transform() * Vector2(BoardView.TAB, BoardView.TAB)
+		backdrop.grid_rect = Rect2(tl, Vector2(bv.cs * GameConfig.COLS, bv.cs * GameConfig.ROWS))
+	backdrop.reduced_motion = sc.reduced_motion
 
 ## Screens: "start" and "reef" are both the reef hub (they differ only in where Play leads).
 func show_screen(name: String) -> void:
@@ -191,8 +206,14 @@ func _apply_tide(force: bool) -> void:
 	if ph == _phase and not force:
 		return
 	_phase = ph
-	pool_screen.reef_peek.palette = Tide.palette(ph)
-	queue_redraw()
+	var pal: Dictionary = BgArt.palette(ph)
+	var night: float = [0.15, 0.0, 0.45, 1.0][ph]
+	backdrop.palette = pal
+	for sc in [pool_screen, trial_screen, help_screen]:
+		var p: PoolScreen = sc
+		p.reef_peek.palette = pal
+		p.reef_peek.night_amount = night
+		p.board_view.palette = pal
 
 ## Play / Resume / Back: where it leads depends on where the hub was opened from.
 func _on_hub_play() -> void:
@@ -214,6 +235,7 @@ func _on_hub_play() -> void:
 var _income_acc: float = 0.0
 
 func _process(delta: float) -> void:
+	_sync_backdrop()
 	_income_acc += delta
 	if _income_acc >= GameConfig.INCOME_TICK_SEC:
 		_income_acc = 0.0

@@ -645,11 +645,13 @@ func _update_buttons() -> void:
 	if cur_mode:
 		btn_current.text = "Cancel"
 		btn_current.icon = "x"
+		btn_current.token_charges = -1
 		btn_current.accent = Pal.RED
 		btn_current.toggled = true
 	else:
-		btn_current.text = "Current x%d" % run.currents
+		btn_current.text = "Current"          # the token carries the charge count
 		btn_current.icon = "wave"
+		btn_current.token_charges = run.currents
 		btn_current.accent = Pal.CURRENT if run.currents > 0 else Pal.TEXT_DIM.darkened(0.2)    # spent: dim
 		btn_current.toggled = false
 	var have_line: bool = cur_mode and cur_axis >= 0

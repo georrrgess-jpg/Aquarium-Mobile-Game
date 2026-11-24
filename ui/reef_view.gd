@@ -13,19 +13,16 @@ signal tapped
 signal slot_tapped(slot: int)
 signal visitor_tapped
 
-const DEFAULT_PALETTE: Dictionary = {
-	"top": Color("33b0cc"), "bottom": Color("0a4a63"),
-	"sand": Color("e9d196"), "sand2": Color("d0af6c"),
-	"ray": 0.06, "overlay": Color(0, 0, 0, 0), "weed": Color("3fae6b"), "bubble": Color(1, 1, 1, 0.38),
-}
-
 var residents: Array = []
 var decorations: Array = []
 var highlight_ids: Array = []          # resident ids to show as "new"
 var placing_kind: int = -1             # decoration being placed (marks free slots), -1 = none
 var selected_slot: int = -1
 var visitor: Dictionary = {}           # Update 3: {visible, accepted, progress_text, t0}
-var palette: Dictionary = DEFAULT_PALETTE:
+## 0 (day) .. 1 (night): how strongly lanterns glow and light shafts fade.
+var night_amount: float = 0.0
+var _arrival_t0: float = -10.0         # when the newest residents arrived (swim-in + splash)
+var palette: Dictionary = BgArt.palette(Tide.MIDDAY):
 	set(v):
 		palette = v
 		_invalidate()
@@ -41,12 +38,12 @@ var compact: bool = false:
 var caption: String = "":
 	set(v):
 		caption = v
-		_static.queue_redraw()
+		_static.invalidate()
 var empty_text: String = "Your reef is empty. Release a tier 4+ creature through the Reef Gate to start it."
 
 ## Set by the owner to rest the idle animation (e.g. while the pool is busy).
 var paused: bool = false
-var _static: Layer
+var _static: BakedLayer
 var _dyn: Layer
 var _t: float = 0.0
 var _since_draw: float = 0.0
@@ -70,7 +67,8 @@ class Layer extends Control:
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = true
-	_static = Layer.new(self, 0)
+	_static = BakedLayer.new()
+	_static.painter = func(ci: Control) -> void: _draw_layer(ci, 0)
 	_dyn = Layer.new(self, 1)
 	add_child(_static)
 	add_child(_dyn)
@@ -87,7 +85,7 @@ func _on_resized() -> void:
 func _invalidate() -> void:
 	_prepared_size = Vector2.ZERO
 	if _static != null:
-		_static.queue_redraw()
+		_static.invalidate()
 		_dyn.queue_redraw()
 
 func set_residents(list: Array) -> void:
@@ -100,6 +98,8 @@ func set_decorations(list: Array) -> void:
 
 func set_highlight(ids: Array) -> void:
 	highlight_ids = ids
+	if not ids.is_empty():
+		_arrival_t0 = _t
 	_invalidate()
 
 func set_placement(kind: int, slot: int) -> void:
@@ -198,48 +198,99 @@ func _prepare() -> void:
 	var base: float = clampf(w / maxf(4.0, float(order.size()) * 0.55 + 2.0), 38.0 if compact else 46.0, 78.0 if compact else 92.0)
 	if compact:
 		base = minf(base, h * 0.40)
+	base = floorf(base)                        # whole pixels: creature art caches by integer size
 	var sand: float = sand_top()
 	for i in order.size():
 		var r: Dictionary = order[i]
 		var id: int = int(r["id"])
 		var spread: float = fposmod(float(i) * 0.6180339 + 0.11, 1.0)
 		var cx: float = w * (0.07 + 0.86 * spread)
-		var is_star: bool = int(r["family"]) == Creature.STAR
+		var fam: int = int(r["family"])
 		var rec: Dictionary = {
-			"code": int(r["code"]), "id": id, "base": base, "cx": cx,
+			"code": int(r["code"]), "id": id, "base": base, "cx": cx, "family": fam,
 			"phase": _hash01(id, 8.0) * TAU, "speed": 0.18 + 0.22 * _hash01(id, 7.0),
 			"range": minf(w / maxf(4.0, float(order.size())) * 0.5, 60.0),
 			"lane": (0.28 + 0.34 * _hash01(id, 9.0)) * (0.92 if compact else 1.0),
-			"star": is_star, "new": highlight_ids.has(id),
+			"star": fam == Creature.STAR, "ray": fam == Creature.RAY, "new": highlight_ids.has(id),
 			"sand_y": sand + (h - sand) * (0.16 + 0.22 * _hash01(id, 11.0)) - base * 0.10,
 		}
+		if fam == Creature.RAY:                # rays glide high and wide
+			rec["lane"] = (0.16 + 0.16 * _hash01(id, 9.0)) * (0.92 if compact else 1.0)
+			rec["range"] = minf(w * 0.30, 130.0)
+			rec["speed"] = 0.10 + 0.08 * _hash01(id, 7.0)
 		rec["animated"] = i < cap_anim
 		if i < cap_anim:
 			_animated.append(rec)
 		_drawn.append(rec)
 
-func _resident_pos(rec: Dictionary, t: float) -> Vector2:
+## Where a resident is at time t, plus its facing and rotation. Each family has its own idle loop:
+## shrimp bob and, every few seconds, flick backwards in a quick dart; starfish sway very slowly and
+## creep; rays glide in long lazy arcs with a steady wing beat.
+func _resident_pose(rec: Dictionary, t: float) -> Dictionary:
 	var base: float = float(rec["base"])
 	var w: float = size.x
 	var cx: float = float(rec["cx"])
+	var ph: float = float(rec["phase"])
+	var pos: Vector2
+	var facing_right: bool = true
+	var rot: float = 0.0
 	if bool(rec["star"]):
-		var px: float = cx + sin(t * 0.12 + float(rec["phase"])) * minf(24.0, float(rec["range"]) * 0.5)
-		return Vector2(clampf(px, base * 0.62, w - base * 0.62), float(rec["sand_y"]))
-	var ang: float = t * float(rec["speed"]) + float(rec["phase"])
-	var px2: float = cx + sin(ang) * float(rec["range"])
-	var py: float = size.y * float(rec["lane"]) * 0.85 + sin(t * 1.1 + float(rec["phase"])) * 5.0
-	py = clampf(py, base * 0.5 + 6.0, sand_top() - base * 0.5)
-	return Vector2(clampf(px2, base * 0.62, w - base * 0.62), py)
-
-func _draw_resident(layer: Layer, rec: Dictionary, t: float, animated: bool) -> void:
-	var pos: Vector2 = _resident_pos(rec, t if animated else 0.0)
-	var base: float = float(rec["base"])
-	var opts: Dictionary = {}
-	if bool(rec["star"]):
-		opts = {"rot": sin(t * 0.35 + float(rec["phase"])) * 0.10 if animated else 0.0, "phase": t * 0.8 + float(rec["phase"])}
+		var px: float = cx + sin(t * 0.12 + ph) * minf(24.0, float(rec["range"]) * 0.5)
+		pos = Vector2(px, float(rec["sand_y"]))
+		rot = sin(t * 0.35 + ph) * 0.12
+	elif bool(rec["ray"]):
+		var ang: float = t * float(rec["speed"]) + ph
+		pos = Vector2(cx + sin(ang) * float(rec["range"]), size.y * float(rec["lane"]) + sin(ang * 1.7) * size.y * 0.06)
+		facing_right = cos(ang) > 0.0
+		rot = cos(ang * 1.7) * 0.10 * (1.0 if facing_right else -1.0)
 	else:
-		var facing_right: bool = cos(t * float(rec["speed"]) + float(rec["phase"])) > 0.0 if animated else true
-		opts = {"flip": not facing_right, "phase": t * 3.0 + float(rec["phase"]), "rot": sin(t * 1.4 + float(rec["phase"])) * 0.06 if animated else 0.0}
+		var ang2: float = t * float(rec["speed"]) + ph
+		var px2: float = cx + sin(ang2) * float(rec["range"])
+		var py: float = size.y * float(rec["lane"]) * 0.85 + sin(t * 1.1 + ph) * 5.0
+		facing_right = cos(ang2) > 0.0
+		# the dart: a short, fast backwards flick once per ~5 s
+		var cyc: float = fposmod(t / 5.0 + ph / TAU, 1.0)
+		if cyc < 0.07:
+			var k: float = sin(PI * cyc / 0.07)
+			px2 += (-1.0 if facing_right else 1.0) * 34.0 * k
+			py -= 6.0 * k
+		pos = Vector2(px2, py)
+		rot = sin(t * 1.4 + ph) * 0.06
+	if bool(rec["ray"]):
+		pos.y = clampf(pos.y, base * 0.5 + 6.0, sand_top() - base * 0.7)
+	elif not bool(rec["star"]):
+		pos.y = clampf(pos.y, base * 0.5 + 6.0, sand_top() - base * 0.5)
+	pos.x = clampf(pos.x, base * 0.62, w - base * 0.62)
+	return {"pos": pos, "right": facing_right, "rot": rot}
+
+func _resident_pos(rec: Dictionary, t: float) -> Vector2:
+	return _resident_pose(rec, t)["pos"]
+
+func _draw_resident(layer: Control, rec: Dictionary, t: float, animated: bool) -> void:
+	var pose: Dictionary = _resident_pose(rec, t if animated else 0.0)
+	var pos: Vector2 = pose["pos"]
+	var base: float = float(rec["base"])
+	var alpha: float = 1.0
+	# arrival: a new resident drops in from above and settles with a splash ring
+	if bool(rec["new"]) and animated:
+		var age: float = t - _arrival_t0
+		if age >= 0.0 and age < 1.3:
+			var k: float = clampf(age / 0.9, 0.0, 1.0)
+			var e: float = 1.0 - pow(1.0 - k, 3.0)
+			pos.y = lerpf(-base, pos.y, e)
+			alpha = clampf(age / 0.25, 0.0, 1.0)
+			if age > 0.8 and age < 1.3:
+				var rk: float = (age - 0.8) / 0.5
+				layer.draw_arc(Vector2(pos.x, pos.y + base * 0.35), base * (0.4 + 0.9 * rk), PI * 1.1, PI * 1.9, 18, Color(1, 1, 1, 0.7 * (1.0 - rk)), 3.0, true)
+	var opts: Dictionary = {"alpha": alpha, "rot": float(pose["rot"]) if animated else 0.0}
+	if bool(rec["star"]):
+		opts["phase"] = t * 0.8 + float(rec["phase"])
+	elif bool(rec["ray"]):
+		opts["phase"] = t * 3.2 + float(rec["phase"])       # steady wing beat
+		opts["flip"] = not bool(pose["right"])
+	else:
+		opts["flip"] = not bool(pose["right"])
+		opts["phase"] = t * 3.0 + float(rec["phase"])
 	CreatureArt.draw_creature(layer, int(rec["code"]), pos, base, opts)
 
 # --- Drawing -----------------------------------------------------------------------------------
@@ -250,44 +301,17 @@ func _draw_layer(layer: Control, mode: int) -> void:
 	if _prepared_size != size:
 		_prepare()
 	if mode == 0:
-		_draw_static(layer as Layer)
+		_draw_static(layer)
 	else:
 		_draw_dynamic(layer as Layer)
 
-func _draw_static(ci: Layer) -> void:
+func _draw_static(ci: Control) -> void:
 	var w: float = size.x
 	var h: float = size.y
-	var pal: Dictionary = palette
-	ci.draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(w, 0), Vector2(w, h), Vector2(0, h)]),
-		PackedColorArray([pal["top"], pal["top"], pal["bottom"], pal["bottom"]]))
-	for k in 4:
-		var x0: float = w * (0.12 + 0.24 * float(k))
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(x0, 0), Vector2(x0 + w * 0.10, 0), Vector2(x0 + w * 0.22, h), Vector2(x0 - w * 0.02, h)]), Color(1, 1, 1, float(pal["ray"])))
-	var sand: float = sand_top()
-	var sand_pts := PackedVector2Array()
-	sand_pts.append(Vector2(0, h))
-	for i in 17:
-		sand_pts.append(Vector2(w * float(i) / 16.0, sand + sin(float(i) * 0.9) * h * 0.018))
-	sand_pts.append(Vector2(w, h))
-	ci.draw_colored_polygon(sand_pts, pal["sand"])
-	var sand2 := PackedVector2Array()
-	sand2.append(Vector2(0, h))
-	for i in 17:
-		sand2.append(Vector2(w * float(i) / 16.0, sand + h * 0.06 + sin(float(i) * 1.3 + 1.0) * h * 0.012))
-	sand2.append(Vector2(w, h))
-	ci.draw_colored_polygon(sand2, pal["sand2"])
-	_draw_rock(ci, Vector2(w * 0.04, sand + h * 0.03), h * 0.12)
-	_draw_rock(ci, Vector2(w * 0.97, sand + h * 0.04), h * 0.15)
-	# tide tint over the water (drawn once here, not re-blended on every animated frame)
-	var ov: Color = pal["overlay"]
-	if ov.a > 0.0:
-		ci.draw_rect(Rect2(Vector2.ZERO, size), ov)
-	# still decorations
-	for d in decorations:
-		var kind: int = _kind_of(String(d["id"]))
-		if kind >= 0 and not _decor_animated(kind):
-			DecorArt.draw(ci, kind, slot_rect(int(d["slot"])), 0.0, {"animate": false})
-	# residents that are not animated
+	var rect := Rect2(0, 0, w, h)
+	BgArt.draw_reef_far(ci, rect, palette)
+	BgArt.draw_reef_mid(ci, rect, palette)
+	# residents that are not animated (they stand still on the sand or hang in the water)
 	for rec in _drawn:
 		if not bool(rec["animated"]):
 			_draw_resident(ci, rec, 0.0, false)
@@ -312,25 +336,22 @@ func _draw_dynamic(ci: Layer) -> void:
 	var w: float = size.x
 	var h: float = size.y
 	var t: float = 0.0 if reduced_motion else _t
-	var sand: float = sand_top()
-	# seaweed
-	for k in 6:
-		var bx: float = w * (0.06 + 0.17 * float(k)) + _hash01(k, 1.0) * 14.0
-		_draw_weed(ci, Vector2(bx, sand + h * 0.03), h * (0.18 + 0.10 * _hash01(k, 2.0)), t, float(k))
-	# bubbles
-	for k in 8:
-		var bx2: float = w * _hash01(k, 3.0)
-		var speed: float = 14.0 + 22.0 * _hash01(k, 4.0)
-		var by: float = fposmod(h - (t * speed + _hash01(k, 5.0) * h), h)
-		ci.draw_arc(Vector2(bx2 + sin(t + float(k)) * 5.0, by), 2.0 + 3.0 * _hash01(k, 6.0), 0.0, TAU, 10, palette["bubble"], 1.2, true)
-	# animated decorations
+	var rect := Rect2(0, 0, w, h)
+	# decorations: each one changes the scene around it (light pool, beam, bubble stream, ...)
 	for d in decorations:
 		var kind: int = _kind_of(String(d["id"]))
-		if kind >= 0 and _decor_animated(kind):
-			DecorArt.draw(ci, kind, slot_rect(int(d["slot"])), t, {"animate": not reduced_motion})
+		if kind >= 0:
+			var sr: Rect2 = slot_rect(int(d["slot"]))
+			DecorArt.world_effect(ci, kind, sr, rect, t, night_amount)
+	for d in decorations:
+		var kind2: int = _kind_of(String(d["id"]))
+		if kind2 >= 0:
+			DecorArt.draw(ci, kind2, slot_rect(int(d["slot"])), t, {"animate": not reduced_motion, "badge": false})
 	# animated residents
 	for rec in _animated:
 		_draw_resident(ci, rec, t, not reduced_motion)
+	# drifting kelp, bubbles and the ambient fish school pass in front
+	BgArt.draw_reef_front(ci, rect, palette, t, not reduced_motion)
 	# "new resident" highlight: pulsing ring + NEW tag (shape, not just colour)
 	for rec in _drawn:
 		if bool(rec["new"]):
@@ -414,14 +435,3 @@ func _draw_wrapped(ci: Control, font: Font, text: String, center: Vector2, width
 	for ln in lines:
 		ci.draw_string(font, Vector2(center.x - width * 0.5, y), String(ln), HORIZONTAL_ALIGNMENT_CENTER, width, fs, col)
 		y += fs * 1.3
-
-func _draw_rock(ci: Control, base: Vector2, s: float) -> void:
-	ci.draw_colored_polygon(PackedVector2Array([base + Vector2(-s, 0), base + Vector2(-s * 0.7, -s * 0.8), base + Vector2(-s * 0.1, -s), base + Vector2(s * 0.6, -s * 0.6), base + Vector2(s, 0)]), Color("5b7f86"))
-	ci.draw_colored_polygon(PackedVector2Array([base + Vector2(-s * 0.7, -s * 0.8), base + Vector2(-s * 0.1, -s), base + Vector2(0.0, -s * 0.5)]), Color("7fa3aa"))
-
-func _draw_weed(ci: Control, base: Vector2, s: float, t: float, seed: float) -> void:
-	var pts := PackedVector2Array()
-	for i in 7:
-		var f: float = float(i) / 6.0
-		pts.append(base + Vector2(sin(t * 0.9 + seed + f * 2.2) * s * 0.12 * f, -s * f))
-	ci.draw_polyline(pts, palette["weed"], 5.0, true)

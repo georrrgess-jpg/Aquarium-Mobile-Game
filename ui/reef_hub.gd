@@ -118,7 +118,8 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	panel.add_child(decor_list)
 	decor_list.row_tapped.connect(_select_decor)
 	decor_summary = Label.new()
-	decor_summary.add_theme_font_size_override("font_size", 15)
+	decor_summary.add_theme_font_size_override("font_size", 14)
+	decor_summary.clip_text = true
 	decor_summary.add_theme_color_override("font_color", Pal.TEXT)
 	decor_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	panel.add_child(decor_summary)
@@ -312,10 +313,10 @@ func _layout() -> void:
 	roster_scroll.position = Vector2(8, 8)
 	roster_scroll.size = Vector2(pw, PANEL_H - 16.0)
 	roster.custom_minimum_size.x = pw
-	decor_list.position = Vector2(8, 6)
-	decor_list.size = Vector2(pw, 200.0)
-	decor_summary.position = Vector2(10, 208)
-	decor_summary.size = Vector2(pw - 4.0, 42)
+	decor_list.position = Vector2(8, 4)
+	decor_list.size = Vector2(pw, 192.0)
+	decor_summary.position = Vector2(10, 198)
+	decor_summary.size = Vector2(pw - 4.0, 44)
 	btn_buy.position = Vector2(8, PANEL_H - 46.0)
 	btn_buy.size = Vector2(pw * 0.62, 38)
 	btn_cancel_buy.position = Vector2(8.0 + pw * 0.62 + 6.0, PANEL_H - 46.0)
@@ -510,7 +511,7 @@ func _refresh_decor_summary() -> void:
 	var new_rate: float = ReefEconomy.rate_with_decoration(p, String(def["id"]))
 	var gain: String = "%.1f → %.1f coins/h (+%.1f)" % [now_rate, new_rate, new_rate - now_rate]
 	if _sel_slot < 0:
-		decor_summary.text = "%s · %d coins\nIncome %s. Tap a marked spot above." % [def["name"], price, gain]
+		decor_summary.text = "%s · %d coins · tap a marked spot\nIncome %s" % [def["name"], price, gain]
 		btn_buy.text = "Pick a spot"
 		btn_buy.enabled = false
 	elif p.coins < price:
@@ -557,7 +558,8 @@ func _apply_tide(force: bool) -> void:
 		tide_badge.queue_redraw()
 		return
 	_phase = ph
-	reef.palette = Tide.palette(ph)
+	reef.night_amount = [0.15, 0.0, 0.45, 1.0][ph]
+	reef.palette = BgArt.palette(ph)
 	tide_badge.phase = ph
 	tide_badge.queue_redraw()
 
@@ -634,6 +636,7 @@ class IncomeStrip extends Control:
 		draw_string(font, Vector2(size.x * 0.52, size.y * 0.5 + 6), mult, HORIZONTAL_ALIGNMENT_RIGHT, size.x * 0.48 - 14.0, 17, Pal.SAND_DEEP.darkened(0.5))
 
 class ChestBanner extends Control:
+	var opening: bool = false
 	var amount: int = 0
 	var full: bool = false
 	var secs: int = 0
@@ -648,13 +651,11 @@ class ChestBanner extends Control:
 	func _draw() -> void:
 		draw_style_box(_sb, Rect2(Vector2.ZERO, size))
 		var font: Font = ThemeDB.fallback_font
-		# a little chest: lid + body + lock (shape cue)
-		draw_rect(Rect2(12, 14, 30, 24), Pal.SAND_DEEP)
-		draw_rect(Rect2(12, 14, 30, 9), Pal.SAND_DARK)
-		draw_rect(Rect2(24, 20, 6, 8), Pal.GOLD)
-		draw_string(font, Vector2(52, 22), "Offline chest", HORIZONTAL_ALIGNMENT_LEFT, size.x - 200.0, 15, Pal.TEXT)
+		# the chest, glowing with what waited for you; opens briefly when claimed
+		ItemArt.draw_chest(self, Rect2(8, 2, 48, 46), ItemArt.CHEST_OPEN if opening else ItemArt.CHEST_FULL, 0.9)
+		draw_string(font, Vector2(64, 22), "Offline chest", HORIZONTAL_ALIGNMENT_LEFT, size.x - 200.0, 15, Pal.TEXT)
 		var away: String = "%dh %02dm away" % [int(secs / 3600.0), int(secs / 60.0) % 60]
-		draw_string(font, Vector2(52, 42), "%s coins · %s%s" % [PoolScreen._fmt(amount), away, " (8h max)" if full else ""], HORIZONTAL_ALIGNMENT_LEFT, size.x - 190.0, 16, Pal.TEXT)
+		draw_string(font, Vector2(64, 42), "%s coins · %s%s" % [PoolScreen._fmt(amount), away, " (8h max)" if full else ""], HORIZONTAL_ALIGNMENT_LEFT, size.x - 200.0, 16, Pal.TEXT)
 
 class DecorList extends Control:
 	signal row_tapped(kind: int)
@@ -683,23 +684,23 @@ class DecorList extends Control:
 		var font: Font = ThemeDB.fallback_font
 		for i in GameConfig.DECORATIONS.size():
 			var def: Dictionary = GameConfig.DECORATIONS[i]
-			var rc := Rect2(0, float(i) * ROW_H, size.x, ROW_H - 3.0)
+			var rc := Rect2(3, float(i) * ROW_H + 2.0, size.x - 6.0, ROW_H - 4.0)
 			var owned: bool = ReefEconomy.owns(p, String(def["id"]))
 			var chosen: bool = hub._sel_kind == i
 			var afford: bool = p.coins >= int(def["price"])
-			_sb.bg_color = Pal.SAND if chosen else (Pal.PANEL if not owned else Pal.PANEL.darkened(0.25))
-			_sb.border_color = Pal.GOLD if chosen else Pal.SAND_DARK.darkened(0.2)
-			_sb.set_border_width_all(3 if chosen else 1)
-			draw_style_box(_sb, rc)
-			var tc: Color = Pal.INK if chosen else Pal.TEXT
-			DecorArt.draw(self, i, Rect2(6, rc.position.y + 1, 26, 33), 0.0, {"animate": false, "alpha": 0.4 if owned else 1.0})
-			draw_string(font, Vector2(40, rc.position.y + 17), String(def["name"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.45, 17, tc)
-			draw_string(font, Vector2(40, rc.position.y + 32), "Beauty +%d" % int(def["beauty"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.4, 13, tc if chosen else Pal.TEXT_DIM)
-			var right: String = "Placed" if owned else "%d" % int(def["price"])
-			var rcol: Color = tc
-			if not owned and not afford:
-				rcol = Pal.RED if not chosen else Pal.CORAL_DARK
-			draw_string(font, Vector2(size.x * 0.5, rc.position.y + 25), right, HORIZONTAL_ALIGNMENT_RIGHT, size.x * 0.5 - 12.0, 18, rcol)
+			var st: int = ItemArt.STATE_OWNED if owned else (ItemArt.STATE_SELECTED if chosen else (ItemArt.STATE_AVAILABLE if afford else ItemArt.STATE_UNAFFORDABLE))
+			ItemArt.draw_card_frame(self, rc, st, {"badge": false})
+			DecorArt.draw(self, i, Rect2(rc.position.x + 6.0, rc.position.y + 1.0, 26.0, rc.size.y - 2.0), 0.0, {"animate": false, "state": st, "badge": false})
+			draw_string(font, Vector2(rc.position.x + 40.0, rc.position.y + 16.0), String(def["name"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.42, 16, Pal.INK)
+			draw_string(font, Vector2(rc.position.x + 40.0, rc.position.y + 29.0), "Beauty +%d" % int(def["beauty"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.4, 12, Pal.SAND_DEEP.darkened(0.5))
+			if owned:
+				draw_string(font, Vector2(size.x * 0.5, rc.position.y + 24.0), "Placed", HORIZONTAL_ALIGNMENT_RIGHT, size.x * 0.5 - 40.0, 16, Color("2d7a4d"))
+				ItemArt.draw_check_seal(self, Vector2(rc.end.x - 16.0, rc.position.y + rc.size.y * 0.5), 18.0)
+			else:
+				var pc: Color = Pal.INK if afford else Color("a63a30")
+				draw_string(font, Vector2(size.x * 0.5, rc.position.y + 25.0), "%d" % int(def["price"]), HORIZONTAL_ALIGNMENT_RIGHT, size.x * 0.5 - 38.0, 18, pc)
+				ItemArt.draw_coin(self, Vector2(rc.end.x - 20.0, rc.position.y + rc.size.y * 0.5), 20.0, ItemArt.STATE_AVAILABLE if afford else ItemArt.STATE_UNAFFORDABLE)
+
 
 class TideBadge extends Control:
 	var phase: int = 1

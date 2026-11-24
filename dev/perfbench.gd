@@ -22,6 +22,10 @@ func _ready() -> void:
 	await get_tree().create_timer(0.6).timeout
 	var scenario: String = str(main.args.get("scenario", "pool"))
 	print("[bench] scenario=%s window=%s viewport=%s renderer=%s" % [scenario, DisplayServer.window_get_size(), get_viewport().get_visible_rect().size, RenderingServer.get_video_adapter_name()])
+	# experiment switches (cost attribution): --nobd drops the backdrop, --noreefstrip hides the pool's reef strip
+	if main.args.has("nobd") and main.get("backdrop") != null:
+		main.backdrop.queue_free()
+		main.backdrop = null
 	await call("scenario_" + scenario)
 	get_tree().quit(0)
 
@@ -254,6 +258,15 @@ func scenario_reef() -> void:
 	rec_stop("reef_populated_30_idle")
 	await click_btn(play_button())
 	await frames(30)
+	var ps: Node = main.pool_screen
+	for what in str(main.args.get("hide", "")).split(","):     # experiment: --hide=strip,gate,board,hud
+		match what:
+			"strip": ps.reef_peek.visible = false
+			"gate": ps.gate.visible = false
+			"board": ps.board_view.visible = false
+			"bdanim": main.backdrop._anim.visible = false
+			"bdstatic": main.backdrop._static.visible = false
+	await frames(10)
 	rec_start()
 	await get_tree().create_timer(10.0).timeout
 	rec_stop("pool_with_reef_strip_30_idle")

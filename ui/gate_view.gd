@@ -65,45 +65,24 @@ func _draw() -> void:
 	elif hint:
 		glow = 0.5 + (0.0 if reduced_motion else 0.3 * sin(_t * 4.0))
 	glow = maxf(glow, _flash)
-	var half: int = int(w * 0.5)
-	_sb.bg_color = Pal.SAND
-	_sb.set_corner_radius_all(16)
-	_sb.corner_radius_top_left = half
-	_sb.corner_radius_top_right = half
-	_sb.border_color = Pal.CORAL if glow > 0.0 else Pal.SAND_DARK
-	_sb.set_border_width_all(4 if glow > 0.0 else 3)
-	if glow > 0.0:
-		_ogb.border_color = Color(Pal.CORAL, 0.4 * glow)
-		_ogb.set_border_width_all(6)
-		_ogb.set_corner_radius_all(18)
-		_ogb.corner_radius_top_left = half + 3
-		_ogb.corner_radius_top_right = half + 3
-		draw_style_box(_ogb, Rect2(Vector2(-3, -3), size + Vector2(6, 6)))
-	draw_style_box(_sb, Rect2(Vector2.ZERO, size))
-	var inner := Rect2(Vector2(9, 9), size - Vector2(18, 18))
-	_isb.bg_color = Color("1f9bbd").lerp(Color("8ff3df"), glow * 0.6)
-	_isb.set_corner_radius_all(10)
-	_isb.corner_radius_top_left = int(inner.size.x * 0.5)
-	_isb.corner_radius_top_right = int(inner.size.x * 0.5)
-	draw_style_box(_isb, inner)
-	# ripples
-	for k in 4:
-		var y: float = h * (0.32 + 0.14 * float(k))
-		var pts := PackedVector2Array()
-		for i in 9:
-			var f: float = float(i) / 8.0
-			pts.append(Vector2(lerpf(14.0, w - 14.0, f), y + sin(f * TAU * 1.5 + _t * 2.0 + float(k)) * 3.0))
-		draw_polyline(pts, Color(1, 1, 1, 0.22), 2.0, true)
+	var st: int = ItemArt.STATE_SELECTED if glow > 0.0 else ItemArt.STATE_AVAILABLE
+	var animate: bool = glow > 0.0 and not reduced_motion
+	ItemArt.draw_reef_gate(self, Rect2(Vector2.ZERO, size), st, _t, residents, {"animate": animate})
 	var font: Font = ThemeDB.fallback_font
-	var tc: Color = Pal.TEXT
-	draw_string(font, Vector2(0, h * 0.13), "REEF", HORIZONTAL_ALIGNMENT_CENTER, w, 17, tc)
-	draw_string(font, Vector2(0, h * 0.13 + 19), "GATE", HORIZONTAL_ALIGNMENT_CENTER, w, 17, tc)
-	var tier_txt := "tier %d+" % GameConfig.RELEASE_MIN_TIER
-	draw_string(font, Vector2(0, h * 0.62), tier_txt, HORIZONTAL_ALIGNMENT_CENTER, w, 16, Pal.GOLD)
-	draw_string(font, Vector2(0, h * 0.62 + 20), "drop or", HORIZONTAL_ALIGNMENT_CENTER, w, 14, Pal.TEXT_DIM)
-	draw_string(font, Vector2(0, h * 0.62 + 36), "tap here", HORIZONTAL_ALIGNMENT_CENTER, w, 14, Pal.TEXT_DIM)
-	# residents counter
-	var cy: float = h - 42.0
+	# labels sit inside the portal; a dark outline keeps them readable over the bright water
+	_label(font, "REEF", Vector2(0, h * 0.20), w, 17, Pal.TEXT)
+	_label(font, "GATE", Vector2(0, h * 0.20 + 19), w, 17, Pal.TEXT)
+	_label(font, "tier %d+" % GameConfig.RELEASE_MIN_TIER, Vector2(0, h * 0.58), w, 16, Pal.GOLD)
+	_label(font, "drop or", Vector2(0, h * 0.58 + 20), w, 14, Pal.TEXT)
+	_label(font, "tap here", Vector2(0, h * 0.58 + 36), w, 14, Pal.TEXT)
+	# residents counter in the clear space at the foot of the arch
+	var cy: float = h - 40.0
 	draw_circle(Vector2(w * 0.5, cy + 6.0), 17.0, Pal.INK)
+	draw_arc(Vector2(w * 0.5, cy + 6.0), 17.0, 0.0, TAU, 20, Pal.GOLD, 2.0, true)
 	draw_string(font, Vector2(0, cy + 13.0), str(residents), HORIZONTAL_ALIGNMENT_CENTER, w, 22, Pal.GOLD)
-	draw_string(font, Vector2(0, h - 12.0), "in reef", HORIZONTAL_ALIGNMENT_CENTER, w, 13, Pal.TEXT_DIM)
+	_label(font, "in reef", Vector2(0, h - 10.0), w, 13, Pal.TEXT_DIM)
+
+func _label(font: Font, text: String, pos: Vector2, width: float, fs: int, col: Color) -> void:
+	for off in [Vector2(-1.5, 0), Vector2(1.5, 0), Vector2(0, -1.5), Vector2(0, 1.5)]:
+		draw_string(font, pos + off, text, HORIZONTAL_ALIGNMENT_CENTER, width, fs, Color(Pal.INK, 0.85))
+	draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_CENTER, width, fs, col)

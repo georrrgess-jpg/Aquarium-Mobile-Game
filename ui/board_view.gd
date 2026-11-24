@@ -71,6 +71,8 @@ var _last_drag_dir: int = 0
 var _drag_pos: Vector2 = Vector2.ZERO
 var _shake: Dictionary = {}
 var _bursts: Array = []
+var _links: Array = []          # chain links: a line from the previous merge to the next, drawn briefly
+var _chain_prev: int = -1
 var _tile: StyleBoxFlat = StyleBoxFlat.new()
 var _ring: StyleBoxFlat = StyleBoxFlat.new()
 
@@ -109,6 +111,8 @@ func _init() -> void:
 	_ring.bg_color = Color(0, 0, 0, 0)
 	_ring.set_corner_radius_all(10)
 	_ring.anti_aliasing = true
+	_base = BakedLayer.new()
+	_base.painter = func(ci: Control) -> void: _paint_base(ci)
 	_under = Layer.new(self, 0)
 	_creatures = Control.new()
 	_creatures.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -116,6 +120,7 @@ func _init() -> void:
 	_over = Layer.new(self, 1)
 	_fx = Control.new()
 	_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_base)
 	add_child(_under)
 	add_child(_creatures)
 	add_child(_over)
@@ -133,7 +138,7 @@ func _relayout() -> void:
 	var bs: Vector2 = board_pixel_size()
 	custom_minimum_size = bs
 	size = bs
-	for l in [_under, _over, _fx]:
+	for l in [_base, _under, _over, _fx]:
 		var c: Control = l
 		c.position = Vector2.ZERO
 		c.size = bs
@@ -144,6 +149,7 @@ func _relayout() -> void:
 		n.size = Vector2(cs, cs)
 		n.pivot_offset = Vector2(cs, cs) * 0.5
 		n.position = _cell_pos(int(k))
+	_base.invalidate()
 	_under.queue_redraw()
 	_over.queue_redraw()
 
@@ -152,6 +158,16 @@ func _cell_pos(i: int) -> Vector2:
 	return Vector2(Board.col_of(i), Board.row_of(i)) * cs
 
 ## Cell rectangle relative to this control.
+var palette: Dictionary = BgArt.palette(Tide.MIDDAY):
+	set(v):
+		palette = v
+		if _base != null:
+			_base.invalidate()
+		if _under != null:
+			_under.queue_redraw()
+var _base: BakedLayer              # frame + tiles: rendered to a texture, redone only when the tile occupancy changes
+var _base_mask: String = ""
+
 func cell_rect(i: int) -> Rect2:
 	return Rect2(Vector2(TAB, TAB) + _cell_pos(i), Vector2(cs, cs))
 
@@ -257,6 +273,12 @@ func sync(board: Board) -> void:
 			n.modulate = Color.WHITE
 		else:
 			_spawn(i, code)
+	var mask: String = ""
+	for k in board.cells.size():
+		mask += "1" if board.code_at(k) != 0 else "0"
+	if mask != _base_mask:
+		_base_mask = mask
+		_base.invalidate()
 	_under.queue_redraw()
 	_over.queue_redraw()
 
@@ -390,6 +412,11 @@ func _on_release(pos: Vector2) -> void:
 			drop_requested.emit(selected, c)
 
 func _process(delta: float) -> void:
+	if not _links.is_empty():
+		for l in _links:
+			l["age"] = float(l["age"]) + delta
+		_links = _links.filter(func(l: Dictionary) -> bool: return float(l["age"]) < 0.75)
+		_over.queue_redraw()
 	var animating: bool = not reduced_motion and (selected >= 0 or not surge_preview.is_empty() or not hint_cells.is_empty() or not guide.is_empty() or not line_preview.is_empty() or not hint_line.is_empty() or flood_flash or not _bursts.is_empty())
 	if animating:
 		_t += delta
@@ -424,23 +451,27 @@ func _draw_under(ci: Control) -> void:
 	for c in GameConfig.COLS:
 		var rect2 := Rect2(TAB + float(c) * cs + 3, 1, cs - 6, TAB - 4)
 		_draw_tab(ci, rect2, tab_active, (line_preview.get("axis", -1) == Board.AXIS_COL and line_preview.get("index", -1) == c) or (line_preview.is_empty() and hint_line.get("axis", -1) == Board.AXIS_COL and hint_line.get("index", -1) == c), false)
-	for i in board.cells.size():
-		var rc: Rect2 = cell_rect(i).grow(-2.0)
-		_tile.bg_color = Pal.CELL if (Board.row_of(i) + Board.col_of(i)) % 2 == 0 else Pal.CELL_ALT
-		if board.code_at(i) == 0:
-			_tile.bg_color = _tile.bg_color.darkened(0.18)
-		_tile.set_border_width_all(0)
-		ci.draw_style_box(_tile, rc)
-		if flood_flash and board.code_at(i) == 0:
-			var rr := Pal.RED
-			rr.a = 0.35 + (0.0 if reduced_motion else 0.2 * sin(_t * 8.0))
-			_tile.bg_color = rr
-			ci.draw_style_box(_tile, rc)
+	if flood_flash:
+		for i in board.cells.size():
+			if board.code_at(i) == 0:
+				var rr := Pal.RED
+				rr.a = 0.35 + (0.0 if reduced_motion else 0.2 * sin(_t * 8.0))
+				_tile.bg_color = rr
+				ci.draw_style_box(_tile, cell_rect(i).grow(-2.0))
 	# tutorial line hint tint
 	if not hint_line.is_empty() and line_preview.is_empty():
 		_tint_line(ci, int(hint_line["axis"]), int(hint_line["index"]), Pal.GOLD, 0.16 + (0.0 if reduced_motion else 0.08 * sin(_t * 4.0)))
 	if not line_preview.is_empty():
 		_tint_line(ci, int(line_preview["axis"]), int(line_preview["index"]), Pal.CURRENT, 0.22)
+
+## The board's frame and tiles, painted into the baked layer (static scenery for the grid).
+func _paint_base(ci: Control) -> void:
+	if session == null or session.run == null:
+		return
+	var board: Board = session.run.board
+	BgArt.draw_board_frame(ci, Rect2(Vector2(TAB, TAB), Vector2(cs * GameConfig.COLS, cs * GameConfig.ROWS)), palette)
+	for i in board.cells.size():
+		BgArt.draw_tile(ci, cell_rect(i).grow(-2.0), (Board.row_of(i) + Board.col_of(i)) % 2, board.code_at(i) != 0, palette)
 
 func _draw_tab(ci: Control, rect: Rect2, active: bool, chosen: bool, horizontal: bool) -> void:
 	var col: Color = Pal.CURRENT if (active or chosen) else Pal.TEXT_DIM.darkened(0.45)
@@ -566,6 +597,17 @@ func _draw_over(ci: Control) -> void:
 	if _dragging and selected >= 0 and session.run.board.code_at(selected) != 0:
 		CreatureArt.draw_creature(ci, session.run.board.code_at(selected), _drag_pos, cs * 1.15, {"alpha": 0.92})
 	# bursts
+	for l in _links:
+		var la: float = float(l["age"]) / 0.75
+		var lc: Color = l["color"]
+		lc.a = 0.9 * (1.0 - la * la)
+		var pa: Vector2 = l["a"]
+		var pb: Vector2 = l["b"]
+		var reach: Vector2 = pa.lerp(pb, minf(1.0, la * 4.0))         # the link travels from one merge to the next
+		ci.draw_line(pa, reach, Color(Pal.INK, 0.55 * lc.a), 7.0, true)
+		ci.draw_line(pa, reach, lc, 4.0, true)
+		for e in [pa, pb]:
+			ci.draw_arc(e, cs * (0.34 + 0.12 * la), 0.0, TAU, 24, lc, 3.0, true)
 	for b in _bursts:
 		var a: float = float(b["age"]) / 0.45
 		var bc: Color = b["color"]
@@ -744,8 +786,22 @@ func _pop(node: Control) -> void:
 		tw0.tween_property(node, "modulate", Color.WHITE, 0.25 / anim_speed)
 		return
 	node.scale = Vector2(1.45, 0.62)
+	node.modulate = Color(1.9, 1.9, 1.6)                      # evolution: a bright flash that settles back
+	var tw0: Tween = create_tween()
+	tw0.tween_property(node, "modulate", Color.WHITE, _dur(0.28))
 	var tw: Tween = create_tween()
 	tw.tween_property(node, "scale", Vector2.ONE, _dur(GameConfig.T_POP + 0.12)).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+
+## A chain: draw a link from the merge before this one to the cells that took part in this one.
+func _chain_link(result_cell: int, participants: Array, step: int) -> void:
+	if step >= 1 and _chain_prev >= 0 and _chain_prev != result_cell:
+		_links.append({"a": cell_rect(_chain_prev).get_center(), "b": cell_rect(result_cell).get_center(), "age": 0.0, "color": Pal.GOLD})
+	for p in participants:
+		if int(p) != result_cell and step >= 1:
+			_links.append({"a": cell_rect(int(p)).get_center(), "b": cell_rect(result_cell).get_center(), "age": 0.0, "color": Pal.CURRENT})
+	_chain_prev = result_cell
+	if not _links.is_empty():
+		_over.queue_redraw()
 
 func _burst(cell: int, col: Color) -> void:
 	if reduced_motion:
@@ -794,6 +850,7 @@ func shake(cell: int) -> void:
 
 ## Replay the events of one resolved action, then snap to the authoritative board.
 func play_events(events: Array, final_board: Board) -> void:
+	_chain_prev = -1
 	for ev in events:
 		match String(ev["t"]):
 			"move":
@@ -832,6 +889,13 @@ func _emit_reward(ev: Dictionary) -> void:
 	_burst(cell, Pal.tier_color(int(ev.get("tier", 1))))
 	float_text(cell, "+%d" % int(ev.get("coins", 0)), Pal.GOLD)
 
+## Contact: the pieces meet and hold for a beat before the new creature appears.
+func _contact(cell: int) -> void:
+	if reduced_motion:
+		return
+	_bursts.append({"pos": cell_rect(cell).get_center(), "age": 0.3, "color": Color(1, 1, 1)})   # short, white: no evolution colour yet
+	await _wait(0.04)
+
 func _ev_pair(ev: Dictionary) -> void:
 	var from: int = int(ev["from"])
 	var to: int = int(ev["to"])
@@ -843,6 +907,8 @@ func _ev_pair(ev: Dictionary) -> void:
 		_creatures.move_child(src, -1)
 		await _slide(src, _cell_pos(to), GameConfig.T_SLIDE)
 		src.queue_free()
+		await _contact(to)
+	_chain_link(to, [from], int(ev.get("step", 0)))
 	dst.set_code(code)
 	_pop(dst)
 	_emit_reward(ev)
@@ -869,6 +935,12 @@ func _ev_merge(ev: Dictionary) -> void:
 		tw.kill()
 	for n in moving:
 		(n as Control).queue_free()
+	if not moving.is_empty():
+		await _contact(result_cell)
+	var parts: Array = []
+	for s2 in sources:
+		parts.append(int(s2))
+	_chain_link(result_cell, parts, int(ev.get("step", 0)))
 	var res_node: CreatureView = _ensure(result_cell, code)
 	res_node.set_code(code)
 	_pop(res_node)

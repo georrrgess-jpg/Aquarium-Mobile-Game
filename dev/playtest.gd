@@ -902,6 +902,7 @@ func scenario_input() -> void:
 func scenario_hub_layout() -> void:
 	var se: GameSession = session()
 	GameClock.freeze(1795000000)
+	se.profile.tutorial["done"] = true          # an established player: the full hub, not the first-run one
 	se.profile.residents = fake_residents(24)
 	se.profile.next_resident_id = 25
 	se.profile.unseen_residents = [24]

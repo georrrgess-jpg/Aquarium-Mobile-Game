@@ -31,6 +31,12 @@ var toggled: bool = false:
 		toggled = v
 		queue_redraw()
 var font_size: int = 20
+## Current control: when >= 0 the left of the button is drawn as the Current token with this many charges.
+var token_charges: int = -1:
+	set(v):
+		token_charges = v
+		queue_redraw()
+var token_selected: bool = false
 var _down: bool = false
 var _hover: bool = false
 var _sb: StyleBoxFlat = StyleBoxFlat.new()
@@ -87,6 +93,16 @@ func _draw() -> void:
 	if filled and enabled:
 		tc = Pal.INK
 	var font: Font = ThemeDB.fallback_font
+	if token_charges >= 0:
+		var ts: float = size.y - 8.0
+		var tw: float = ts * 1.2
+		ItemArt.draw_current_token(self, Rect2(5.0, 4.0, tw, ts), token_charges, ItemArt.STATE_SELECTED if token_selected else ItemArt.STATE_AVAILABLE, 0.0)
+		var tx: float = 5.0 + tw + 6.0
+		var tfs: int = font_size
+		while tfs > 12 and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, tfs).x > size.x - tx - 6.0:
+			tfs -= 1
+		draw_string(font, Vector2(tx, size.y * 0.5 + tfs * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 4.0, tfs, tc)
+		return
 	var icon_size: float = minf(size.y * 0.5, 26.0)
 	var fs: int = fitted_font_size()
 	var icon_w: float = 0.0
@@ -171,14 +187,9 @@ static func draw_icon(ci: CanvasItem, kind: String, c: Vector2, s: float, col: C
 			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-h, -h * 0.35), c + Vector2(-h * 0.35, -h * 0.35), c + Vector2(h * 0.2, -h * 0.9), c + Vector2(h * 0.2, h * 0.9), c + Vector2(-h * 0.35, h * 0.35), c + Vector2(-h, h * 0.35)]), col)
 			ci.draw_line(c + Vector2(-h, h), c + Vector2(h, -h), col, maxf(2.5, s * 0.14), true)
 		"coin":
-			ci.draw_circle(c, h, Pal.GOLD)
-			ci.draw_circle(c, h * 0.68, Pal.GOLD.darkened(0.2))
-			ci.draw_circle(c, h * 0.5, Pal.GOLD)
+			ItemArt.draw_coin(ci, c, s * 1.05)
 		"pearl":
-			ci.draw_circle(c, h + 1.5, Color("5b86a8"))
-			ci.draw_circle(c, h, Color("e8f4ff"))
-			ci.draw_circle(c + Vector2(-h * 0.25, -h * 0.25), h * 0.35, Color(1, 1, 1, 0.95))
-			ci.draw_arc(c, h, 0.2, 2.9, 12, Color("9cc7ff"), maxf(1.5, s * 0.1), true)
+			ItemArt.draw_pearl(ci, c, s * 1.1)
 		"dawn":      # half sun over a horizon
 			ci.draw_arc(c + Vector2(0, h * 0.35), h * 0.7, PI, TAU, 14, col, maxf(2.0, s * 0.14), true)
 			ci.draw_line(c + Vector2(-h, h * 0.35), c + Vector2(h, h * 0.35), col, maxf(2.0, s * 0.12), true)
