@@ -288,8 +288,8 @@ func _layout_prompt() -> void:
 	var skip_w: float = 74.0
 	prompt_label.position = Vector2(12, 2)
 	prompt_label.size = Vector2(_prompt_iw - 24.0 - ((skip_w + 6.0) if btn_skip.visible else 0.0), 54)
-	btn_skip.position = Vector2(_prompt_iw - 10.0 - skip_w, 11)
-	btn_skip.size = Vector2(skip_w, 36)
+	btn_skip.position = Vector2(_prompt_iw - 8.0 - skip_w, 7)
+	btn_skip.size = Vector2(skip_w, 44)
 
 func _layout() -> void:
 	if board_view == null:
@@ -377,8 +377,8 @@ func _layout() -> void:
 	y += bar_h + 8.0
 	reef_peek.position = Vector2(x0, y)
 	reef_peek.size = Vector2(iw, maxf(60.0, h - y - 8.0))
-	toast.position = Vector2(x0 + 20.0, board_view.position.y + 40.0)
 	toast.size = Vector2(iw - 40.0, 0)
+	toast.max_text_w = iw - 82.0
 	for b in [btn_home, btn_reef, btn_motion, btn_sound, btn_current, btn_dir_a, btn_dir_b, btn_confirm, btn_tide, btn_help, btn_restart_guided, btn_keep_going]:
 		(b as PillButton).font_size = 19
 	btn_tide.font_size = 18
@@ -386,6 +386,16 @@ func _layout() -> void:
 	btn_keep_going.font_size = 17
 	# Trial mode: no balances, Reef Gate or reef strip; Hint / Retry take the strip's place
 	var sb_mode: bool = is_sandbox()
+	# Toasts sit on the reef strip (decoration, nothing to play there) so they never hide the cells
+	# or buttons the player needs next; the sandboxes have no strip, so they use the top of the grid.
+	if sb_mode:
+		toast.place_in = Rect2(x0, board_view.position.y + 34.0, iw, bsz.y)
+		toast.place_bottom = false
+		toast.max_h = 0.0
+	else:
+		toast.place_in = Rect2(reef_peek.position, reef_peek.size)
+		toast.place_bottom = true
+		toast.max_h = reef_peek.size.y - 12.0
 	gate.visible = not trial_mode
 	reef_peek.visible = not sb_mode
 	chip_pearls.visible = not sb_mode
@@ -860,7 +870,8 @@ func _coach_hint() -> Dictionary:
 				out["line"] = {"axis": Board.AXIS_ROW, "index": 1}
 				return out
 	# (the "a Current would make a merge right now" tip is found incrementally, see _process)
-	out["text"] = "Merge matching pairs or slide into empty cells. A Surge lands every 3rd turn."
+	var cad: int = run.cadence       # the Calm Pool lands a Surge every 5th turn, a standard pool every 3rd
+	out["text"] = "Merge matching pairs or slide into empty cells. A Surge lands every %s turn." % ("3rd" if cad == 3 else "%dth" % cad)
 	if Visitor.has_request(session.profile):
 		var req: Dictionary = session.profile.visitor["request"]
 		if not bool(req["created"]):
@@ -1109,14 +1120,22 @@ func _play_result(res: Dictionary) -> void:
 
 ## Goals and Lantern Ray progress arrive with committed actions; say so once the animation is done.
 func _announce_progress(res: Dictionary) -> void:
+	# Most important first (the Lantern Ray, then goals, then the Book); at most three lines are
+	# shown so the toast always fits the reef strip it sits on, with a pointer to where the rest is.
 	var lines: PackedStringArray = PackedStringArray()
-	for g in res.get("goals_done", []):
-		var rw: String = "+%d coins" % int(g["coins"]) + (" +%d pearl%s" % [int(g["pearls"]), "" if int(g["pearls"]) == 1 else "s"] if int(g["pearls"]) > 0 else "")
-		lines.append("Goal complete: %s  %s" % [g["label"], rw])
+	if bool(res.get("visitor_complete", false)):
+		lines.append("The Lantern Ray joins your reef!")
+		if sfx != null:
+			sfx.pop(4)
+	if bool(res.get("visitor_created", false)):
+		lines.append("Lantern Ray: now release it through the Reef Gate!")
 	var tg: Dictionary = res.get("tide_goal_done", {})
 	if not tg.is_empty():
 		lines.append("Tide Goal complete: %s  +%d coins +%d pearls" % [tg["short"], int(tg["coins"]), int(tg["pearls"])])
 		goal_strip.celebrate()
+	for g in res.get("goals_done", []):
+		var rw: String = "+%d coins" % int(g["coins"]) + (" +%d pearl%s" % [int(g["pearls"]), "" if int(g["pearls"]) == 1 else "s"] if int(g["pearls"]) > 0 else "")
+		lines.append("Goal complete: %s  %s" % [g["label"], rw])
 	var fresh: Array = res.get("book_new", [])
 	if not fresh.is_empty() and not session.run.tutorial:
 		var names: PackedStringArray = PackedStringArray()
@@ -1125,12 +1144,10 @@ func _announce_progress(res: Dictionary) -> void:
 		lines.append("New in your Tidepool Book: " + ", ".join(names))
 	if bool(res.get("calm_reset", false)):
 		lines.append("The pool filled up, so Calm Pool made a fresh board. No harm done.")
-	if bool(res.get("visitor_created", false)):
-		lines.append("Lantern Ray: now release it through the Reef Gate!")
-	if bool(res.get("visitor_complete", false)):
-		lines.append("The Lantern Ray joins your reef!")
-		if sfx != null:
-			sfx.pop(4)
+	if lines.size() > 3:
+		var extra: int = lines.size() - 2
+		lines = lines.slice(0, 2)
+		lines.append("+%d more: see the Goals and Book tabs" % extra)
 	if not lines.is_empty():
 		toast.show_text("\n".join(lines), 3.2)
 		chip_coins.punch_now()

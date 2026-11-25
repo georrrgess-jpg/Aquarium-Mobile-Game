@@ -78,6 +78,26 @@ func _button(text: String, icon: String, col: Color) -> PillButton:
 	panel.add_child(b)
 	return b
 
+## Height of an auto-wrapped label's text, measured (not guessed) so the blocks below it can follow it.
+func _text_h(l: Label, width: float) -> float:
+	if not l.visible or l.text == "":
+		return 0.0
+	var fs: int = l.get_theme_font_size("font_size")
+	var font: Font = ThemeDB.fallback_font
+	var n: int = PoolOverlays.wrap(font, l.text, width, fs).size()
+	return float(n) * font.get_height(fs) + 4.0
+
+## A wrapping label keeps a stale (taller) minimum height until the frame after its text or width
+## changed, so refresh() lays out once now and once more after that frame (see _layout_again).
+func _box(l: Control, pos: Vector2, sz: Vector2) -> void:
+	l.position = pos
+	l.size = sz
+
+func _layout_again() -> void:
+	_layout()
+
+## Everything above the survivor list stacks top to bottom by its measured height, so a long goal
+## text or a huge balance pushes the list down instead of running into it.
 func _layout() -> void:
 	if panel == null:
 		return
@@ -90,23 +110,31 @@ func _layout() -> void:
 	panel.size = Vector2(pw, ph)
 	var m: float = 18.0
 	var iw: float = pw - 2.0 * m
-	title_label.position = Vector2(m, 12)
-	title_label.size = Vector2(iw, 44)
-	stats_label.position = Vector2(m, 56)
-	stats_label.size = Vector2(iw, 46)
-	band.position = Vector2(m, 108)
+	var y: float = 12.0
+	_box(title_label, Vector2(m, y), Vector2(iw, 48))
+	y += 48.0
+	var sh: float = maxf(24.0, _text_h(stats_label, iw))
+	_box(stats_label, Vector2(m, y), Vector2(iw, sh))
+	y += sh + 6.0
+	band.position = Vector2(m, y)
 	band.size = Vector2(iw, 116)
-	goal_label.position = Vector2(m, 232)
-	goal_label.size = Vector2(iw, 52)
-	banked_label.position = Vector2(m, 292)
-	banked_label.size = Vector2(iw, 26)
-	surv_title.position = Vector2(m, 332)
-	surv_title.size = Vector2(iw - 150.0, 28)
-	btn_all.position = Vector2(pw - m - 140.0, 328)
-	btn_all.size = Vector2(140, 38)
+	y += 116.0 + 8.0
+	var gh: float = _text_h(goal_label, iw)
+	_box(goal_label, Vector2(m, y), Vector2(iw, maxf(gh, 1.0)))
+	y += gh + (6.0 if gh > 0.0 else 0.0)
+	var bh: float = maxf(26.0, _text_h(banked_label, iw))
+	_box(banked_label, Vector2(m, y), Vector2(iw, bh))
+	y += bh + 8.0
+	var tw: float = iw - (150.0 if btn_all.visible else 0.0)
+	var th: float = maxf(28.0, _text_h(surv_title, tw))
+	var row_h: float = maxf(th, 44.0 if btn_all.visible else 0.0)
+	_box(surv_title, Vector2(m, y + (row_h - th) * 0.5), Vector2(tw, th))
+	btn_all.position = Vector2(pw - m - 140.0, y)
+	btn_all.size = Vector2(140, 44)
 	btn_all.font_size = 17
-	surv_scroll.position = Vector2(m, 372)
-	surv_scroll.size = Vector2(iw, maxf(60.0, ph - 372.0 - 150.0))
+	y += row_h + 6.0
+	surv_scroll.position = Vector2(m, y)
+	surv_scroll.size = Vector2(iw, maxf(60.0, ph - y - 150.0))
 	surv_flow.custom_minimum_size = Vector2(iw - 4.0, 0)
 	var by: float = ph - 142.0
 	var half: float = (iw - 8.0) * 0.5
@@ -124,6 +152,10 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED or (what == NOTIFICATION_VISIBILITY_CHANGED and visible):
 		_layout()
 
+## Exact with thousands separators; compact (1.23B) once it would not fit a line.
+static func _big(n: int) -> String:
+	return PoolScreen.fmt_hud(n) if n >= 10000000 else PoolScreen._fmt(n)
+
 static func format_time(sec: float) -> String:
 	var s: int = int(sec)
 	return "%d:%02d" % [int(s / 60.0), s % 60]
@@ -138,7 +170,6 @@ func survivors() -> Array:
 	return out
 
 func refresh() -> void:
-	_layout()
 	var run: RunState = session.run
 	var st: Dictionary = run.stats
 	var why: String = "The next wave had nowhere to land"
@@ -159,9 +190,11 @@ func refresh() -> void:
 			goal_label.add_theme_color_override("font_color", Pal.TEXT_DIM)
 	band.queue_redraw()
 	banked_label.text = "Earned %s coins · %s pearls   Banked: %s · %s" % [
-		PoolScreen._fmt(int(st["coins"])), PoolScreen._fmt(int(st["pearls"])), PoolScreen.fmt_hud(session.profile.coins), PoolScreen.fmt_hud(session.profile.pearls)]
+		_big(int(st["coins"])), _big(int(st["pearls"])), PoolScreen.fmt_hud(session.profile.coins), PoolScreen.fmt_hud(session.profile.pearls)]
 	_rebuild_survivors()
 	_refresh_flow()
+	_layout()
+	_layout_again.call_deferred()
 
 ## The summary leads naturally onward: when residents were released and not yet seen the
 ## reef is the highlighted next step (it earns passive coins); otherwise the next pool is.
@@ -191,7 +224,7 @@ func _rebuild_survivors() -> void:
 	for cell in list:
 		var code: int = session.run.board.code_at(int(cell))
 		var card := Control.new()
-		card.custom_minimum_size = Vector2(150, 104)
+		card.custom_minimum_size = Vector2(150, 118)
 		card.draw.connect(func() -> void:
 			var sbx := StyleBoxFlat.new()
 			sbx.bg_color = Pal.PANEL_DARK
@@ -204,8 +237,8 @@ func _rebuild_survivors() -> void:
 		btn.text = "Release"
 		btn.accent = Pal.TEAL
 		btn.font_size = 17
-		btn.position = Vector2(10, 68)
-		btn.size = Vector2(130, 30)
+		btn.position = Vector2(10, 66)
+		btn.size = Vector2(130, 44)
 		btn.pressed.connect(func() -> void: _release_one(int(cell)))
 		card.add_child(btn)
 		surv_flow.add_child(card)

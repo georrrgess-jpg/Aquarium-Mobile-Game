@@ -4,7 +4,7 @@ extends Control
 ## currently in view are drawn, so a big reef stays cheap. Newest (unseen) residents
 ## come first with a NEW tag.
 
-const CARD_H: float = 92.0
+const CARD_H: float = 106.0
 const GAP: float = 8.0
 
 var residents: Array = []
@@ -67,10 +67,20 @@ func _draw() -> void:
 			_sb.set_border_width_all(4 if is_new else 2)
 			draw_style_box(_sb, rc)
 			CreatureArt.draw_creature(self, int(r["code"]), rc.position + Vector2(cw * 0.5, 36.0), 56.0, {})
+			# long names ("Sunflower Starfish") wrap onto two lines at a readable size instead of shrinking to ~10 px
 			var nm: String = _short_name(int(r["code"]))
-			draw_string(font, rc.position + Vector2(0, 70), nm, HORIZONTAL_ALIGNMENT_CENTER, cw, _fit(font, nm, cw - 8.0, 14), Pal.INK)
+			var nfs: int = 14
+			var nlines: PackedStringArray = PackedStringArray([nm])
+			if font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, nfs).x > cw - 8.0 and nm.contains(" "):
+				nfs = 13
+				var sp: int = nm.rfind(" ")
+				nlines = PackedStringArray([nm.substr(0, sp), nm.substr(sp + 1)])
+			var ny: float = 70.0 if nlines.size() == 2 else 78.0
+			for ln in nlines:
+				draw_string(font, rc.position + Vector2(0, ny), ln, HORIZONTAL_ALIGNMENT_CENTER, cw, _fit(font, ln, cw - 6.0, nfs, 12), Pal.INK)
+				ny += 14.0
 			var rate: String = "+%s/h" % _fmt_rate(ReefEconomy.resident_rate(tier))
-			draw_string(font, rc.position + Vector2(0, 86), rate, HORIZONTAL_ALIGNMENT_CENTER, cw, 13, Pal.SAND_DEEP.darkened(0.45))
+			draw_string(font, rc.position + Vector2(0, 100), rate, HORIZONTAL_ALIGNMENT_CENTER, cw, 13, Pal.SAND_DEEP.darkened(0.45))
 			if is_new:
 				var tag := Rect2(rc.position + Vector2(4, 4), Vector2(36, 18))
 				draw_rect(tag, Pal.GOLD)
@@ -87,7 +97,7 @@ static func _short_name(code: int) -> String:
 static func _fmt_rate(r: float) -> String:
 	return ("%.1f" % r) if r < 100.0 else ("%.0f" % r)
 
-static func _fit(font: Font, text: String, width: float, fs: int) -> int:
-	while fs > 10 and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > width:
+static func _fit(font: Font, text: String, width: float, fs: int, min_fs: int = 10) -> int:
+	while fs > min_fs and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > width:
 		fs -= 1
 	return fs

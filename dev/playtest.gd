@@ -1168,6 +1168,7 @@ func scenario_u3_tide() -> void:
 func scenario_u3_visitor() -> void:
 	GameClock.set_tz_bias_seconds(0)
 	var se: GameSession = session()
+	se.profile.tutorial["done"] = true          # an established player: the full hub
 	GameClock.freeze(at(12, 0))
 	main.show_screen("start")
 	await frames(8)
@@ -1217,6 +1218,7 @@ func scenario_u3_visitor() -> void:
 func scenario_u3_visitor_a() -> void:
 	GameClock.set_tz_bias_seconds(0)
 	var se: GameSession = session()
+	se.profile.tutorial["done"] = true
 	main.hub.refresh("start")
 	check(Visitor.offered(se.profile), "offered at launch time (06:30 by --clock)")
 	await click(main.hub.btn_accept.get_global_rect().get_center())
@@ -1367,6 +1369,7 @@ func scenario_u3_goals() -> void:
 func scenario_u3_layout() -> void:
 	GameClock.set_tz_bias_seconds(0)
 	var se: GameSession = session()
+	se.profile.tutorial["done"] = true
 	se.profile.residents = fake_residents(26)
 	se.profile.next_resident_id = 27
 	se.profile.coins = 98765432

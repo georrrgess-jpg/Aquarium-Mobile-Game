@@ -84,6 +84,7 @@ func setup(s: GameSession, audio: Sfx) -> void:
 	add_child(tide_badge)
 	btn_help = _btn("", "help", Pal.SAND)
 	btn_help.pressed.connect(func() -> void:
+		move_child(help_sheet, get_child_count() - 1)       # above the banners and tab buttons so its Close is reachable
 		help_sheet.open())
 	help_sheet = PoolOverlays.HelpSheet.new()
 	add_child(help_sheet)
@@ -268,8 +269,11 @@ func _layout() -> void:
 			tb0.position = Vector2(x0 + float(i) * (tw0 + g), 56.0 + ah + 8.0 + 72.0 + 8.0)
 			tb0.size = Vector2(tw0, 40)
 			tb0.font_size = 15
-		toast.position = Vector2(x0 + 20.0, 56.0 + ah - 80.0)
 		toast.size = Vector2(iw - 40.0, 0)
+		toast.max_text_w = iw - 82.0
+		toast.place_in = Rect2(x0, 56.0, iw, ah)
+		toast.place_bottom = true
+		toast.max_h = 0.0
 		var ow0: float = iw * 0.94
 		help_sheet.max_h = ah - 20.0
 		help_sheet.size = Vector2(ow0, minf(380.0, ah - 20.0))
@@ -284,14 +288,25 @@ func _layout() -> void:
 	y += 52.0 + 8.0
 	var chest_on: bool = ReefEconomy.chest_amount(session.profile) > 0
 	var vis_on: bool = _visitor_visible()
-	var below: float = 46.0 + 8.0 + (58.0 if chest_on else 0.0) + (66.0 if vis_on else 0.0) + 42.0 + 6.0 + PANEL_H + 8.0 + 64.0 + 8.0 + 40.0 + 8.0
-	var aq_h: float = maxf(180.0, h - y - below)
+	# Chest and visitor banners can both be up at once (a player returning at dawn). The aquarium
+	# is the flexible part: it shrinks first (never below 100 px), then the income strip and Play
+	# button trim a few pixels, so Play and the settings always stay on screen.
+	var inc_h: float = 46.0
+	var play_h: float = 64.0
+	var below: float = inc_h + 8.0 + (58.0 if chest_on else 0.0) + (66.0 if vis_on else 0.0) + 42.0 + 6.0 + PANEL_H + 8.0 + play_h + 8.0 + 40.0 + 8.0
+	var aq_h: float = h - y - below
+	if aq_h < 130.0:
+		inc_h = 40.0
+		play_h = 56.0
+		below -= 14.0
+		aq_h = h - y - below
+	aq_h = maxf(100.0, aq_h)
 	reef.position = Vector2(x0, y)
 	reef.size = Vector2(iw, aq_h)
 	y += aq_h + 8.0
 	income.position = Vector2(x0, y)
-	income.size = Vector2(iw, 46)
-	y += 46.0 + 8.0
+	income.size = Vector2(iw, inc_h)
+	y += inc_h + 8.0
 	chest_banner.visible = chest_on
 	btn_claim.visible = chest_on
 	if chest_on:
@@ -319,15 +334,15 @@ func _layout() -> void:
 	var pw: float = iw - 16.0
 	roster_scroll.position = Vector2(8, 8)
 	roster_scroll.size = Vector2(pw, PANEL_H - 16.0)
-	roster.custom_minimum_size.x = pw
+	roster.custom_minimum_size.x = pw - _scrollbar_w()      # leave room for the scrollbar so the list never sticks out of the panel
 	decor_list.position = Vector2(8, 4)
 	decor_list.size = Vector2(pw, 192.0)
-	decor_summary.position = Vector2(10, 198)
-	decor_summary.size = Vector2(pw - 4.0, 44)
-	btn_buy.position = Vector2(8, PANEL_H - 46.0)
-	btn_buy.size = Vector2(pw * 0.62, 38)
-	btn_cancel_buy.position = Vector2(8.0 + pw * 0.62 + 6.0, PANEL_H - 46.0)
-	btn_cancel_buy.size = Vector2(pw * 0.38 - 6.0, 38)
+	decor_summary.position = Vector2(10, 197)
+	decor_summary.size = Vector2(pw - 4.0, 40)
+	btn_buy.position = Vector2(8, PANEL_H - 50.0)
+	btn_buy.size = Vector2(pw * 0.62, 44)
+	btn_cancel_buy.position = Vector2(8.0 + pw * 0.62 + 6.0, PANEL_H - 50.0)
+	btn_cancel_buy.size = Vector2(pw * 0.38 - 6.0, 44)
 	goals_list.position = Vector2(8, 6)
 	goals_list.size = Vector2(pw, PANEL_H - 12.0)
 	modes_list.position = Vector2(8, 6)
@@ -336,21 +351,28 @@ func _layout() -> void:
 	book_view.size = Vector2(pw, PANEL_H - 12.0)
 	y += PANEL_H + 8.0
 	btn_play.position = Vector2(x0, y)
-	btn_play.size = Vector2(iw, 64)
+	btn_play.size = Vector2(iw, play_h)
 	btn_play.font_size = 26
-	y += 64.0 + 8.0
+	y += play_h + 8.0
 	var tw: float = (iw - 2.0 * g) / 3.0
 	for i in 3:
 		var tb: PillButton = [btn_motion, btn_sound, btn_haptics][i]
 		tb.position = Vector2(x0 + float(i) * (tw + g), y)
 		tb.size = Vector2(tw, 40)
 		tb.font_size = 15
-	toast.position = Vector2(x0 + 20.0, panel.position.y + 12.0)    # over the tab panel, never over the aquarium
-	toast.size = Vector2(iw - 40.0, 0)
+	toast.size = Vector2(iw - 40.0, 0)                              # over the bottom of the tab panel, never over the aquarium
+	toast.max_text_w = iw - 82.0
+	toast.position = Vector2(x0 + 20.0, panel.position.y + PANEL_H - 66.0)
+	toast.place_in = Rect2(panel.position, panel.size)
+	toast.place_bottom = true
+	toast.max_h = PANEL_H - 20.0
 	var ow1: float = iw * 0.94
-	help_sheet.max_h = aq_h + 140.0
-	help_sheet.size = Vector2(ow1, minf(380.0, aq_h + 40.0))
+	help_sheet.max_h = minf(440.0, h - reef.position.y - 16.0)       # a modal sheet: free to cover the banners, but full size
+	help_sheet.size = Vector2(ow1, minf(380.0, help_sheet.max_h))
 	help_sheet.position = Vector2((w - ow1) * 0.5, reef.position.y + 8.0)
+
+func _scrollbar_w() -> float:
+	return maxf(12.0, roster_scroll.get_v_scroll_bar().get_combined_minimum_size().x)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED or (what == NOTIFICATION_VISIBILITY_CHANGED and visible and reef != null):
@@ -376,7 +398,7 @@ func refresh(new_context: String) -> void:
 	_refresh_buttons()
 	book_view.call("refresh")
 	_show_tab(_active_tab)
-	roster.set_data(p.residents, p.unseen_residents.duplicate(), roster_scroll.size.x if roster_scroll.size.x > 0 else 480.0)
+	roster.set_data(p.residents, p.unseen_residents.duplicate(), (roster_scroll.size.x if roster_scroll.size.x > 0 else 480.0) - _scrollbar_w())
 	roster_scroll.scroll_vertical = 0
 	_refresh_decor()
 	_layout()
@@ -699,7 +721,7 @@ class DecorList extends Control:
 			ItemArt.draw_card_frame(self, rc, st, {"badge": false})
 			DecorArt.draw(self, i, Rect2(rc.position.x + 6.0, rc.position.y + 1.0, 26.0, rc.size.y - 2.0), 0.0, {"animate": false, "state": st, "badge": false})
 			draw_string(font, Vector2(rc.position.x + 40.0, rc.position.y + 16.0), String(def["name"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.42, 16, Pal.INK)
-			draw_string(font, Vector2(rc.position.x + 40.0, rc.position.y + 29.0), "Beauty +%d" % int(def["beauty"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.4, 12, Pal.SAND_DEEP.darkened(0.5))
+			draw_string(font, Vector2(rc.position.x + 40.0, rc.position.y + 30.0), "Beauty +%d" % int(def["beauty"]), HORIZONTAL_ALIGNMENT_LEFT, size.x * 0.4, 13, Pal.SAND_DEEP.darkened(0.5))
 			if owned:
 				draw_string(font, Vector2(size.x * 0.5, rc.position.y + 24.0), "Placed", HORIZONTAL_ALIGNMENT_RIGHT, size.x * 0.5 - 40.0, 16, Color("2d7a4d"))
 				ItemArt.draw_check_seal(self, Vector2(rc.end.x - 16.0, rc.position.y + rc.size.y * 0.5), 18.0)
@@ -719,7 +741,8 @@ class TideBadge extends Control:
 		_sb.anti_aliasing = true
 	func _draw() -> void:
 		var pal: Dictionary = Tide.palette(phase)
-		_sb.bg_color = Color(pal["top"]).lerp(Color(pal["bottom"]), 0.55)
+		# the phase colour, darkened until the cream text reads on it in every phase (Dawn's pale sky was ~2.8:1)
+		_sb.bg_color = Color(pal["top"]).lerp(Color(pal["bottom"]), 0.55).darkened(0.45)
 		_sb.border_color = Pal.SAND
 		draw_style_box(_sb, Rect2(Vector2.ZERO, size))
 		var icon: String = ["dawn", "sun", "dusk", "moon"][phase]
@@ -727,7 +750,7 @@ class TideBadge extends Control:
 		var font: Font = ThemeDB.fallback_font
 		draw_string(font, Vector2(42, 17), Tide.phase_name(phase), HORIZONTAL_ALIGNMENT_LEFT, size.x - 46.0, 17, Pal.TEXT)
 		var d: Dictionary = GameClock.local_dict()
-		draw_string(font, Vector2(42, 35), "%02d:%02d" % [int(d["hour"]), int(d["minute"])], HORIZONTAL_ALIGNMENT_LEFT, size.x - 46.0, 14, Pal.TEXT_DIM)
+		draw_string(font, Vector2(42, 35), "%02d:%02d" % [int(d["hour"]), int(d["minute"])], HORIZONTAL_ALIGNMENT_LEFT, size.x - 46.0, 14, Pal.TEXT)
 
 class VisitorBanner extends Control:
 	var text: String = ""

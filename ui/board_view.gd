@@ -696,15 +696,29 @@ func _draw_guide_label(ci: Control, label: String, cells: PackedInt32Array, col:
 	var chosen: Rect2 = Rect2(cands[0], Vector2(w, h))
 	guide_label_rect = Rect2()
 	var found: bool = false
-	for c in cands:
-		var r := Rect2(Vector2(clampf(c.x, bounds.position.x, bounds.end.x - w), clampf(c.y, bounds.position.y, bounds.end.y - h)), Vector2(w, h))
-		var clash: bool = false
-		for a in avoid:
-			if r.intersects(a):
-				clash = true
-		if not clash:
-			chosen = r
-			found = true
+	# pass 0 also keeps clear of every other creature on the grid; pass 1 only protects the marked cells
+	var occupied: Array = []
+	if session != null and session.run != null:
+		var bd: Board = session.run.board
+		for i in bd.cells.size():
+			if bd.code_at(i) != 0 and not cells.has(i):
+				occupied.append(cell_rect(i).grow(-6.0))
+	for pass_i in 2:
+		for c in cands:
+			var r := Rect2(Vector2(clampf(c.x, bounds.position.x, bounds.end.x - w), clampf(c.y, bounds.position.y, bounds.end.y - h)), Vector2(w, h))
+			var clash: bool = false
+			for a in avoid:
+				if r.intersects(a):
+					clash = true
+			if not clash and pass_i == 0:
+				for o in occupied:
+					if r.intersects(o):
+						clash = true
+			if not clash:
+				chosen = r
+				found = true
+				break
+		if found:
 			break
 	if not found:
 		return                                  # never cover a target: skip the label instead

@@ -432,6 +432,12 @@ func _draw_wrapped(ci: Control, font: Font, text: String, center: Vector2, width
 	if cur != "":
 		lines.append(cur)
 	var y: float = center.y - float(lines.size()) * fs * 0.6
+	# a dark plate behind the text: the water and creatures behind it can be bright (Midday)
+	var plate_w: float = 0.0
+	for ln0 in lines:
+		plate_w = maxf(plate_w, font.get_string_size(String(ln0), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x)
+	var plate := Rect2(center.x - plate_w * 0.5 - 10.0, y - float(fs) - 4.0, plate_w + 20.0, float(lines.size()) * fs * 1.3 + 10.0)
+	ci.draw_rect(plate, Color(0.03, 0.2, 0.26, 0.78))
 	for ln in lines:
 		ci.draw_string(font, Vector2(center.x - width * 0.5, y), String(ln), HORIZONTAL_ALIGNMENT_CENTER, width, fs, col)
 		y += fs * 1.3

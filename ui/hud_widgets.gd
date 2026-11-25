@@ -166,6 +166,7 @@ class GoalStrip extends Control:
 
 class Toast extends PanelContainer:
 	var label: Label
+	var _view: Label
 	var icon_box: Control
 	var kind: String = "info"
 	var _tw: Tween
@@ -201,17 +202,55 @@ class Toast extends PanelContainer:
 			if ic != "":
 				PillButton.draw_icon(icon_box, ic, Vector2(13, 13), 22.0, (KINDS[kind] as Dictionary)["color"]))
 		row.add_child(icon_box)
+		# `label` carries the message text (and is what callers/tests read); `_view` shows it, already
+		# wrapped by _fit(), because an auto-wrapping Label keeps a stale minimum height after its width changes.
 		label = Label.new()
-		label.add_theme_font_size_override("font_size", 18)
-		label.add_theme_color_override("font_color", Pal.TEXT)
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.custom_minimum_size = Vector2(280, 0)
+		label.visible = false
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(label)
+		_view = Label.new()
+		_view.add_theme_font_size_override("font_size", 18)
+		_view.add_theme_color_override("font_color", Pal.TEXT)
+		_view.autowrap_mode = TextServer.AUTOWRAP_OFF
+		_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(_view)
 		modulate.a = 0.0
 		visible = false
+	## Placement, set by the screen's layout (screen-local rects). `place_in` is the region the toast sits in:
+	## centred horizontally, bottom-aligned (growing upward) when `place_bottom`, else top-aligned.
+	## It is chosen so a toast never covers the cells or buttons the player has to use next.
+	var place_in: Rect2 = Rect2()
+	var place_bottom: bool = false
+	var max_text_w: float = 400.0
+	var max_h: float = 0.0               # when > 0 the text shrinks (down to 14) to stay this tall
+	const BASE_FS: int = 18
+	const PAD_W: float = 12.0 + 14.0 + 26.0 + 10.0     # style margins + icon box + separation
 	func show_text(text: String, secs: float = 1.6) -> void:
 		show_kind(text, "info", secs)
+	## Width follows the text (up to max_text_w) instead of a fixed 280 px column, so a long
+	## announcement takes 2-3 lines instead of 6; the height is measured, not left to autowrap.
+	func _fit(text: String) -> void:
+		var font: Font = ThemeDB.fallback_font
+		var fs: int = BASE_FS
+		while true:
+			var lines: PackedStringArray = PoolOverlays.wrap(font, text, max_text_w, fs)
+			var w: float = 0.0
+			for ln in lines:
+				w = maxf(w, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x)
+			var h: float = float(lines.size()) * font.get_height(fs)
+			_view.text = "\n".join(lines)
+			_view.add_theme_font_size_override("font_size", fs)
+			_view.custom_minimum_size = Vector2(maxf(120.0, ceilf(w) + 4.0), ceilf(h) + 2.0)
+			reset_size()
+			if max_h <= 0.0 or size.y <= max_h or fs <= 14:
+				break
+			fs -= 1
+	func _place() -> void:
+		if place_in.size.x <= 0.0:
+			return
+		var x: float = place_in.position.x + (place_in.size.x - size.x) * 0.5
+		var y: float = (place_in.end.y - size.y - 6.0) if place_bottom else (place_in.position.y + 6.0)
+		position = Vector2(x, y)
 	## `kind` picks the border colour and a symbol, so the five reasons a move can be refused
 	## (invalid target, capped tier, no Current, tide landing, ended) look different at a glance.
 	func show_kind(text: String, k: String, secs: float = 1.6) -> void:
@@ -221,7 +260,8 @@ class Toast extends PanelContainer:
 		icon_box.queue_redraw()
 		label.text = text
 		visible = true
-		reset_size()
+		_fit(text)
+		_place()
 		modulate.a = 1.0
 		if _tw != null:
 			_tw.kill()
