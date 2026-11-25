@@ -452,6 +452,12 @@ func _finish_tutorial_if_done(res: Dictionary) -> void:
 		run.tutorial = false
 		run.practice = false
 		profile.tutorial["done"] = true
+		if run.mode == "regular" and run.swell_max == 0:
+			# the guided start is over: the same board carries on as a standard run, so the swell begins
+			# counting from here (the opening stays approachable, the run still has an end)
+			run.swell_start = run.turn + GameConfig.SWELL_START
+			run.swell_every = GameConfig.SWELL_EVERY
+			run.swell_max = GameConfig.SWELL_MAX
 		res["tutorial_done"] = true
 
 ## When truly stuck, jump the tide to the next Surge.

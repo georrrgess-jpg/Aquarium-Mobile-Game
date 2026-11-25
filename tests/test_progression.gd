@@ -453,6 +453,14 @@ func t_swell() -> void:
 	g.start_run()
 	g.run.turn = 100
 	check(g.run.surge_size_now() == 3, "the guided first run never swells")
+	g.run.turn = 0
+	g.run.turn = 3
+	g.run.tut_flags = {"pair": true, "current": true, "surge": true, "release": true}
+	g._finish_tutorial_if_done({})
+	g.run.turn = 3 + GameConfig.SWELL_START - 1
+	var before_sw: int = g.run.surge_size_now()
+	g.run.turn = 3 + GameConfig.SWELL_START
+	check(before_sw == 3 and g.run.surge_size_now() == 4, "once the guided start is finished the run swells %d turns later, so it too can end" % GameConfig.SWELL_START)
 	var calm: GameSession = s.calm_session()
 	calm.run.turn = 100
 	check(calm.run.surge_size_now() == 3, "Calm Pool never swells")

@@ -1,4 +1,8 @@
-# Tidepool Tycoon · first playable
+# Tidepool Tycoon
+
+> **Update 4** (illustrated art, guided first run, Hint, Tide Goals, Tidepool Book, Calm Pool, three Trials, results screen) is
+> documented in [HANDOFF.md](HANDOFF.md). Tuning: [dev/perf/TUNING.md](dev/perf/TUNING.md); performance: [dev/perf/UPDATE4.md](dev/perf/UPDATE4.md).
+> The web build in `docs/` is re-exported locally but **not pushed**.
 
 ## ▶ [Play in your browser](https://georrrgess-jpg.github.io/Aquarium-Mobile-Game/)
 

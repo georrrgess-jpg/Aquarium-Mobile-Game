@@ -1,3 +1,101 @@
+# Tidepool Tycoon · handoff for Update 4 (visual overhaul and gameplay)
+
+Update 4 is implemented, verified and committed **locally** (nothing pushed; the earlier handoff asked to keep work local, and
+the web build in `docs/` was re-exported but not published). Older Update 2/3 notes are kept below.
+Commits: `81c4495` pass 1 (first run, input) · `a506fb4` pass 2 (art) · `e5bcb52` pass 3 (progression) · then tuning, review fixes.
+
+## Launch
+```bash
+godot --path .                                        # Godot 4.3
+godot --path . -- --clock=2026-11-24T06:30 --tz=0     # fake local time: Dawn (and the Lantern Ray window)
+godot --path . -- --fresh                             # delete the save first (new-player experience)
+godot --path . -- --safe=48,34                        # simulate notch / home-indicator insets
+```
+Other flags: `--seed=N --save=NAME --speed=X`. Web: `dev/export_web.sh` (re-exported, not pushed).
+
+## What shipped
+**Art.** Original procedural vector art (no image files): Shrimp and Starfish at all six tiers and the Lantern Ray, drawn with
+growth shown by body shape, claws, arms and markings, one key light, readable at board size and reused on the board, reef,
+results, arrival card and Book. Redrawn coins, pearls, Current token, Reef Gate, chest, five decorations (each changes the reef
+when placed: light pool, bubble stream, lantern glow, light shaft...) with available / selected / locked / unaffordable / owned
+card states reused in the shop. New reef (far hills, coral clusters, kelp, rays) and pool backdrop (detail outside the grid, framed
+board, tiles distinct under Dawn / Midday / Dusk / Night). Merge reads contact -> evolution flash -> settle; chains draw links to
+the cells that took part. Reef residents have per-family idle loops and a drop-in arrival.
+**Onboarding.** A new profile sees a living reef and one Play button, then a deterministic guided pool: merge a pair (first
+merge about 2 s of scripted play), a previewed Current that makes a line, read the first Surge, release the tier 4 through
+the Reef Gate (about 9 s scripted; about 25-60 s at a human pace). Tap and drag both work; recovery bar offers a restart when
+the player leaves the path; restart is reward-free until finished and grants the first-release milestone once; Skip and a
+replayable Help (separate board, no payout); arrival card (resident, income, route back, affordable first decoration);
+saved with the board; existing players skip all of it.
+**Pool readability.** Surge countdown, Current charges and Reef Gate stay put; marks use shapes, not colour only; five
+distinct rejection looks (invalid, capped, spent Current, resolving, ended); cancel on Back / Esc / focus loss; reduced motion
+keeps the same information; optional **Hint** (release > chain > line > merge > Current; never mutates the board or RNG).
+**Repeat play.** One optional **Tide Goal** per standard run (saved with the run, paid once, shown above the grid); **Tidepool
+Book** (13 entries, silhouettes for reachable tiers, field notes, backfilled from residents); **Calm Pool** (Surge every 5
+turns, own resumable board, reset instead of flood, no currency / releases / Book / goal / daily / visitor progress);
+**three Trials** (Wrap, Chain, Room) each proved winnable and losable by an exhaustive solver on the real rules, first clear pays
+once, retries free; **results screen** with best merge, releases, longest chain, goal result, **Play Again** / **Visit Reef**.
+Hub tabs: Residents · Decor · Goals · Modes (Trials + Calm Pool) · Book. No timers, energy or mandatory dailies.
+**Save format v4** (v1-v3 migrate; Book backfilled; old Trial flags moved).
+
+## Final tuning values (`config/game_config.gd`; details and before/after in `dev/perf/TUNING.md`)
+Board 6x7, Surge every 3 turns, Surge size 3, 12 start creatures, spawn weights: **unchanged**.
+**New: the swell** `SWELL_START=20, SWELL_EVERY=20, SWELL_MAX=3` (Surge 3 -> 4 at turn 20 -> 5 at 40 -> 6 at 60; the guided start
+begins counting when it finishes). Before it, 180 simulated runs of three bot skill levels never flooded in 300 turns; after,
+casual runs end at median 69 turns (~4.5 min at 4 s/turn), mid 99, expert 138; no flood before turn 15, no stalls. Values are
+copied onto each run at its start, so runs in progress (and old saves) keep their rules. Tide Goal pays 80 coins + 2 pearls;
+Trials pay 150+3 / 120+2 / 120+2 once.
+
+## Verification (all on this Linux container; Godot 4.3)
+* `dev/run_tests.sh`: **134 + 73 + 114 + 70 + 81 = 472 headless checks** (rules, economy and migration, tides / visitor / goals,
+  onboarding and Hint, progression incl. Trial solver, swell). Engine script errors count as failures.
+* Live-UI scenarios with injected mouse/touch input (`dev/playtest.gd`, `dev/ui_review.gd`): guided first run, Skip, Help replay,
+  reload during onboarding, restart, existing save, repeated taps and cancelled drags (24 input checks), Current preview and
+  commit, failed Surge / flood, release, chest claim, mode switching with a regular run suspended (Trials and Calm, board
+  untouched), goals and rewards surviving reload without a second payout, Book, results. All pass.
+* **Session run** (`dev/session.gd`, bot following the Hint through the live UI, 1 turn = 4 s human pace): 23.6 minutes over 2 full
+  runs of 144 and 159 turns (both flooded, the expert bot's ~10-11 min each), reef visits, two decoration purchases, a Chain
+  Trial and a Calm Pool visit; first release at 13 s of play; no stalls; goal "make a tier 4" completed in run 2. Worst frame
+  150 ms (software GL), 34 of 8,693 frames over 100 ms. Casual players: ~4.5 min per run (tuning table).
+* **Performance** (`dev/perf/UPDATE4.md`, same harness, Update 3 build vs this one, median of 3, desktop only): script cost
+  same or better; populated reef 21.8 -> 16.7 ms avg (p95 54 -> 22); idle pool 19.6 -> 17.5; **dense-board action
+  sequence in software GL is slower: 31.6 -> 40.1 ms avg, p95 45 -> 51** (richer creature art rasterised in software; a real GPU
+  was not available to measure).
+* **Final UI review** (`dev/run_ui_review.sh SIZE`, 21 scenarios, objective checks for overlap, tap size >= 44 px, text fit and
+  safe-area insets plus every screenshot viewed): 280x653 and 405x720 with `--safe=48,34`, plus 320x568 and 412x915 spot
+  checks, no-safe-area runs at 280x653 and 405x720, Dawn / Midday / Dusk / Night palettes. Screens: first-run reef + help, guided
+  steps 1-4 + arrival card + Skip + Help + recovery bar, hub with all five tabs / chest / visitor banners / long creature names /
+  123 billion coins, standard pool (goal strip, Hint, Current mode, Surge and swell Surge, every rejection toast, 3-line
+  toast, flood notice, reduced motion), results (goal done / missed / many survivors / huge numbers), the three Trials (start,
+  hint, win, lose), Calm Pool, Help sandbox, Night. 12 defects found and fixed (hub overflow with two banners, unusable Help
+  Close, roster name shrink, toasts covering the board, results text collisions, Dawn badge contrast, sub-44 px buttons, Calm
+  prompt text...). Final run after fixes: 42 of 42 scenario runs pass.
+
+## Playtest routes (5 minutes each)
+**New player:** `godot --path . -- --fresh`. Tap Play, follow the on-board labels (drag or tap; try Hint, Skip, Help, or play
+out of order to see the recovery bar), release the tier 4, read the arrival card, Visit the reef (Decor tab opens with the Coral
+Fan ready), Play to continue as a standard run (Tide Goal strip appears on later runs).
+**Returning player:** launch with an existing save: reef first with Resume run; try the Modes tab (Wrap / Chain / Room Trials, Calm
+Pool), then Resume run (your board is exactly as left); finish a run for the results screen (Play Again / Visit Reef); open the Book
+tab. `--clock=2026-11-24T06:30 --tz=0` also shows Dawn and the Lantern Ray.
+Before / after screenshots: `docs/screenshots/update4_before/` (Update 3 build) and `docs/screenshots/update4_after/` (30 images at
+280 and 405 px wide; also `dev/out/rv_*`).
+
+## Not done / could not be checked
+* No physical device: real touch hardware, notch / home-indicator insets (simulated with `--safe`), haptics and audio, GPU frame
+  rate. Touch was tested through the engine's touch events and mouse emulation.
+* **Larger text settings: not supported** by the game (fixed logical font sizes), so that review item could not be run. The
+  smallest text is 13-14 logical px (a few shrink-to-fit fallbacks to 11-12); at a 280 px wide phone that is about 7 px
+  physical, judged legible by eye only.
+* Row / column Current tabs are 26 px on the short side (an edge-drag tab; the alternative route is Current then drag along
+  a line); widening them would steal edge-cell drags (`BoardView.TAB`).
+* The first guided on-board label still partly covers one bystander shrimp at 405x720 (it never covers the cells to use).
+* An occasional engine message "Invalid polygon data, triangulation failed" from the animated art; nothing visibly breaks.
+* Dense-board windowed frame time regression noted above. Pearls still have no use; mutations, tools, zones, monetisation out
+  of scope.
+
+---
+
 # Tidepool Tycoon · handoff for Updates 2 and 3
 
 Both updates are implemented, verified and committed **locally** (nothing was pushed; the owner asked for local work).

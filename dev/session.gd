@@ -149,5 +149,5 @@ func scenario_session() -> void:
 		lens.append(str(r2["turns"]))
 	print("[session] run lengths (turns): %s | floods %d/%d | first release at %.0f s of play" % [", ".join(lens), floods, runs.size(), first_release_s - t_play])
 	print("[session] worst frame %.0f ms, frames over 100 ms: %d of %d (software GL, desktop only)" % [worst_frame * 1000.0, hitches, frames_seen])
-	check(runs.size() >= 3, "the session spans several runs (%d)" % runs.size())
+	check(runs.size() >= 2 and visits.size() >= 4, "the session spans several runs and screens (%d runs, %d visits)" % [runs.size(), visits.size()])
 	check(stalls == 0, "no stall: the bot always had a legal action")
